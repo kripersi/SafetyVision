@@ -11,6 +11,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QFileDialog,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -26,7 +27,7 @@ from PySide6.QtWidgets import (
     QSpacerItem,
 )
 
-from config import CAMERA_SOURCE, get_camera_source
+from config import CAMERA_SOURCE, get_camera_source, get_camera_sources
 from core.detector import PPEDetector
 from core.video_analyzer import VideoAnalyzer
 
@@ -311,6 +312,10 @@ class VideoPage(QWidget):
         self.output_dir = os.path.join("results", "live_frames")
         os.makedirs(self.output_dir, exist_ok=True)
 
+        self.camera_sources = get_camera_sources()
+        self.selected_camera_index = 0
+        self.camera_selector = None
+
         self.setStyleSheet(GLOBAL_STYLE)
         self.capture = None
         self.current_frame = None
@@ -331,6 +336,14 @@ class VideoPage(QWidget):
         # Анализ текущего кадра каждые 5 секунд
         self.check_timer = QTimer(self)
         self.check_timer.timeout.connect(self.check_live_violations)
+
+    def on_camera_selected(self, index):
+        if index < 0:
+            return
+        self.selected_camera_index = index
+        if self.camera_name is not None:
+            self.camera_name.setText(f"КАМЕРА {index + 1:02d}")
+        self.start_live_feed()
 
     # --------------------------------------------------------
     # UI
@@ -483,17 +496,28 @@ class VideoPage(QWidget):
         cam_bar = QHBoxLayout()
         cam_bar.setSpacing(16)
 
-        cam_name = QLabel("КАМЕРА 04")
+        cam_name = QLabel("КАМЕРА 01")
         cam_name.setFont(mono_font(11, QFont.Bold))
         cam_name.setStyleSheet(f"color: {TEXT}; letter-spacing: 1.6px;")
+        self.camera_name = cam_name
 
         cam_zone = QLabel("Зона 4 · Западный въезд")
         cam_zone.setStyleSheet(f"color: {TEXT_3}; font-size: 11px;")
 
+        self.camera_selector = QComboBox()
+        self.camera_selector.setStyleSheet(
+            f"QComboBox {{ background: {PANEL_2}; color: {TEXT}; border: 1px solid {LINE}; padding: 6px 10px; min-width: 150px; }}"
+            f"QComboBox QAbstractItemView {{ background: {PANEL_2}; color: {TEXT}; selection-background-color: {ACCENT}; }}"
+        )
+        for index, camera in enumerate(self.camera_sources):
+            self.camera_selector.addItem(camera["name"])
+        self.camera_selector.setCurrentIndex(self.selected_camera_index)
+        self.camera_selector.currentIndexChanged.connect(self.on_camera_selected)
+
         cam_bar.addWidget(cam_name)
         cam_bar.addWidget(cam_zone)
         cam_bar.addStretch()
-
+        cam_bar.addWidget(self.camera_selector)
         cam_bar.addWidget(tag("LIVE", ERR))
 
         toolbar_button = QPushButton("Настройки")
@@ -634,11 +658,15 @@ class VideoPage(QWidget):
 
     def start_live_feed(self):
 
-        source = get_camera_source()
+        source = get_camera_source(self.selected_camera_index)
 
         if not source:
             self.add_system_event("Источник камеры не найден")
             return
+
+        if self.camera_name is not None:
+            camera_name = self.camera_sources[self.selected_camera_index]["name"]
+            self.camera_name.setText(camera_name.upper())
 
         if self.capture is not None:
             self.capture.release()
