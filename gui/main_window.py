@@ -5,9 +5,11 @@ from datetime import datetime
 import cv2
 from PySide6.QtCore import QDateTime, QTimer
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -16,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import get_camera_sources
+from config import get_camera_sources, load_cameras, load_monitoring_rules, save_cameras, save_monitoring_rules
 from core.detector import PPEDetector
 from gui.shift_page import ShiftPage
 from gui.video_page import UploadVideoPage, VideoPage
@@ -164,14 +166,22 @@ class MainWindow(QMainWindow):
 
     def normalize_violation_name(self, class_name):
         mapping = {
+            "Hardhat": "Hardhat",
+            "Mask": "Mask",
             "NO-Hardhat": "Без каски",
             "NO-Mask": "Без маски",
             "NO-Safety Vest": "Без жилета",
+            "Safety Cone": "Safety Cone",
+            "Safety Vest": "Safety Vest",
             "Vehicle": "Vehicle",
             "vehicle": "Vehicle",
+            "machinery": "machinery",
             "person": "Person",
         }
         return mapping.get(class_name, class_name)
+
+    def get_active_monitoring_rules(self):
+        return load_monitoring_rules()
 
     def load_activity_log(self):
         if not os.path.exists(self.json_path):
@@ -195,6 +205,7 @@ class MainWindow(QMainWindow):
         if not self.camera_sources:
             return
 
+        rules = self.get_active_monitoring_rules()
         today = datetime.now().strftime("%Y-%m-%d")
         now_text = datetime.now().strftime("%H:%M:%S")
         log_data = self.load_activity_log()
@@ -215,10 +226,16 @@ class MainWindow(QMainWindow):
                 events = []
                 for detection in detections:
                     class_name = detection.get("class_name", "")
-                    label = self.normalize_violation_name(class_name)
-                    if label and label not in {"Person"}:
-                        confidence_pct = int(float(detection.get("confidence", 0.0)) * 100)
-                        events.append((label, confidence_pct))
+                    normalized = self.normalize_violation_name(class_name)
+                    key = class_name
+                    if isinstance(normalized, str):
+                        key = normalized
+                    if not rules.get(key, True):
+                        continue
+                    if normalized in {"Person", "person"}:
+                        continue
+                    confidence_pct = int(float(detection.get("confidence", 0.0)) * 100)
+                    events.append((normalized, confidence_pct))
 
                 if not events:
                     continue
@@ -226,8 +243,9 @@ class MainWindow(QMainWindow):
                 unique_events = []
                 seen = set()
                 for label, confidence in events:
-                    if label not in seen:
-                        seen.add(label)
+                    label_key = str(label)
+                    if label_key not in seen:
+                        seen.add(label_key)
                         unique_events.append(f"{label} • {confidence}%")
 
                 today_events = log_data.setdefault(today, {})
@@ -346,7 +364,7 @@ class MainWindow(QMainWindow):
 
         sidebar_layout.addStretch()
 
-        settings = self.make_nav_button("⚙️ Настройки", None, False)
+        settings = self.make_nav_button("⚙️ Настройки", self.show_settings_page, False)
         profile = self.make_nav_button("👤 Профиль прораба", None, False)
         sidebar_layout.addWidget(settings)
         sidebar_layout.addWidget(profile)
@@ -461,6 +479,152 @@ class MainWindow(QMainWindow):
         self.clear_window()
         self.setCentralWidget(UploadVideoPage(self))
 
+    def show_settings_page(self):
+        self.clear_window()
+        self.setCentralWidget(self.build_settings_page())
+
     def show_shift_page(self):
         self.clear_window()
         self.setCentralWidget(ShiftPage(self))
+
+    def build_settings_page(self):
+        page = QWidget()
+        page.setStyleSheet(
+            "QWidget { background: #0f1115; color: #edf2f7; } "
+            "QLabel { color: #edf2f7; } "
+            "QPushButton { border: 1px solid #2b3038; border-radius: 10px; background: #1a1e25; color: #edf2f7; padding: 8px 12px; } "
+            "QLineEdit { background: #12181d; border: 1px solid #2a3039; border-radius: 8px; color: #edf2f7; padding: 8px 10px; }"
+        )
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(20)
+
+        header_row = QHBoxLayout()
+        title = QLabel("Настройки мониторинга")
+        title.setStyleSheet("font-size: 24px; font-weight: 700;")
+        header_row.addWidget(title)
+        header_row.addStretch()
+
+        back_button = QPushButton("← Назад")
+        back_button.clicked.connect(self.show_main_menu)
+        header_row.addWidget(back_button)
+        layout.addLayout(header_row)
+
+        options = [
+            "Hardhat",
+            "Mask",
+            "NO-Hardhat",
+            "NO-Mask",
+            "NO-Safety Vest",
+            "Person",
+            "Safety Cone",
+            "Safety Vest",
+            "machinery",
+            "vehicle",
+        ]
+        rules = self.get_active_monitoring_rules()
+
+        toggle_group = QWidget()
+        toggle_layout = QVBoxLayout(toggle_group)
+        toggle_layout.setSpacing(10)
+        toggle_layout.addWidget(QLabel("Следить за классами"))
+        for name in options:
+            checkbox = QCheckBox(name)
+            checkbox.setChecked(bool(rules.get(name, True)))
+            checkbox.stateChanged.connect(lambda state, key=name: self._save_monitoring_rule(key, state == 2))
+            toggle_layout.addWidget(checkbox)
+        layout.addWidget(toggle_group)
+
+        cameras_widget = QWidget()
+        cameras_layout = QVBoxLayout(cameras_widget)
+        cameras_layout.setSpacing(12)
+        cameras_layout.addWidget(QLabel("Камеры"))
+
+        current_cameras = load_cameras()
+        for index, camera in enumerate(current_cameras):
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(10)
+
+            name_edit = QLineEdit(camera.get("name", f"Камера {index + 1}"))
+            url_edit = QLineEdit(camera.get("url", ""))
+            name_edit.setPlaceholderText("Имя камеры")
+            url_edit.setPlaceholderText("rtsp://...")
+
+            save_button = QPushButton("Сохранить")
+            save_button.clicked.connect(
+                lambda _, i=index, n=name_edit, u=url_edit: self._update_camera(i, n.text(), u.text())
+            )
+
+            delete_button = QPushButton("Удалить")
+            delete_button.clicked.connect(
+                lambda _, i=index: self._delete_camera(i)
+            )
+
+            row_layout.addWidget(name_edit, 2)
+            row_layout.addWidget(url_edit, 5)
+            row_layout.addWidget(save_button)
+            row_layout.addWidget(delete_button)
+            cameras_layout.addWidget(row)
+
+        new_camera_row = QWidget()
+        new_row_layout = QHBoxLayout(new_camera_row)
+        new_row_layout.setContentsMargins(0, 0, 0, 0)
+        new_row_layout.setSpacing(10)
+
+        new_name = QLineEdit()
+        new_url = QLineEdit()
+        new_name.setPlaceholderText("Имя новой камеры")
+        new_url.setPlaceholderText("rtsp://admin:.../channel/101")
+
+        add_button = QPushButton("Добавить камеру")
+        add_button.clicked.connect(
+            lambda: self._add_camera_from_config(new_name.text(), new_url.text())
+        )
+
+        new_row_layout.addWidget(new_name, 2)
+        new_row_layout.addWidget(new_url, 5)
+        new_row_layout.addWidget(add_button)
+        cameras_layout.addWidget(new_camera_row)
+
+        layout.addWidget(cameras_widget)
+        return page
+
+    def _save_monitoring_rule(self, key, value):
+        rules = self.get_active_monitoring_rules()
+        rules[key] = value
+        save_monitoring_rules(rules)
+
+    def _add_camera_from_config(self, name: str, url: str):
+        text_name = (name or "").strip()
+        text_url = (url or "").strip()
+        if not text_url:
+            return
+
+        cameras = load_cameras()
+        cameras.append({"name": text_name or f"Камера {len(cameras) + 1}", "url": text_url})
+        save_cameras(cameras)
+        self.camera_sources = get_camera_sources()
+        self.show_settings_page()
+
+    def _update_camera(self, index: int, name: str, url: str):
+        cameras = load_cameras()
+        if index < 0 or index >= len(cameras):
+            return
+        text_name = (name or "").strip()
+        text_url = (url or "").strip()
+        if not text_url:
+            return
+        cameras[index] = {"name": text_name or f"Камера {index + 1}", "url": text_url}
+        save_cameras(cameras)
+        self.camera_sources = get_camera_sources()
+
+    def _delete_camera(self, index: int):
+        cameras = load_cameras()
+        if index < 0 or index >= len(cameras):
+            return
+        del cameras[index]
+        save_cameras(cameras)
+        self.camera_sources = get_camera_sources()
+        self.show_settings_page()

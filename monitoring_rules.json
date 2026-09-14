@@ -1,0 +1,12 @@
+{
+  "Hardhat": true,
+  "Mask": true,
+  "NO-Hardhat": true,
+  "NO-Mask": false,
+  "NO-Safety Vest": true,
+  "Person": true,
+  "Safety Cone": false,
+  "Safety Vest": true,
+  "machinery": true,
+  "vehicle": false
+}
