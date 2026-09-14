@@ -1,4 +1,5 @@
 from ultralytics import YOLO
+import cv2
 
 
 class PPEDetector:
@@ -29,6 +30,7 @@ class PPEDetector:
                 continue
 
             for box in result.boxes:
+
                 class_id = int(box.cls[0])
                 confidence = float(box.conf[0])
 
@@ -47,3 +49,69 @@ class PPEDetector:
                 })
 
         return detections
+
+    def draw_detections(self, frame, detections):
+        """
+        Рисует результаты AI на кадре.
+
+        Возвращает НОВУЮ копию кадра.
+        Исходный frame не изменяется.
+        """
+
+        result_frame = frame.copy()
+
+        for detection in detections:
+
+            class_name = detection["class_name"]
+            confidence = detection["confidence"]
+
+            x1, y1, x2, y2 = detection["bbox"]
+
+            # ------------------------------------------------------
+            # Bounding box
+            # ------------------------------------------------------
+
+            cv2.rectangle(
+                result_frame,
+                (x1, y1),
+                (x2, y2),
+                (0, 255, 0),
+                2
+            )
+
+            # ------------------------------------------------------
+            # Текст
+            # ------------------------------------------------------
+
+            label = f"{class_name} {confidence:.2f}"
+
+            # Размер текста
+            (text_width, text_height), baseline = cv2.getTextSize(
+                label,
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                2
+            )
+
+            # Фон под текст
+            cv2.rectangle(
+                result_frame,
+                (x1, y1 - text_height - baseline - 5),
+                (x1 + text_width + 5, y1),
+                (0, 255, 0),
+                -1
+            )
+
+            # Сам текст
+            cv2.putText(
+                result_frame,
+                label,
+                (x1 + 2, y1 - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 0),
+                2,
+                cv2.LINE_AA
+            )
+
+        return result_frame
