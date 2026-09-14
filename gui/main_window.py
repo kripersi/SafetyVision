@@ -1,14 +1,23 @@
+import json
+import os
+from datetime import datetime
+
+import cv2
 from PySide6.QtCore import QDateTime, QTimer
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from config import get_camera_sources
+from core.detector import PPEDetector
 from gui.shift_page import ShiftPage
 from gui.video_page import UploadVideoPage, VideoPage
 
@@ -109,10 +118,18 @@ class MainWindow(QMainWindow):
             }
             """
         )
+        self.camera_sources = get_camera_sources()
+        self.detector = PPEDetector("models/ppe_model.pt")
+        self.json_path = os.path.join("results", "violations.json")
+        os.makedirs(os.path.dirname(self.json_path), exist_ok=True)
         self.clock_label = None
+        self.monitor_timer = QTimer(self)
+        self.monitor_timer.timeout.connect(self.run_background_monitor)
+        self.monitor_timer.start(15000)
         self.clock_timer = QTimer(self)
         self.clock_timer.timeout.connect(self.update_clock)
         self.clock_timer.start(1000)
+        self.run_background_monitor()
         self.show_main_menu()
 
     def update_clock(self):
@@ -145,8 +162,148 @@ class MainWindow(QMainWindow):
         button.setMinimumHeight(46)
         return button
 
+    def normalize_violation_name(self, class_name):
+        mapping = {
+            "NO-Hardhat": "Без каски",
+            "NO-Mask": "Без маски",
+            "NO-Safety Vest": "Без жилета",
+            "Vehicle": "Vehicle",
+            "vehicle": "Vehicle",
+            "person": "Person",
+        }
+        return mapping.get(class_name, class_name)
+
+    def load_activity_log(self):
+        if not os.path.exists(self.json_path):
+            return {}
+
+        try:
+            with open(self.json_path, "r", encoding="utf-8") as file:
+                data = json.load(file)
+            return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def save_activity_log(self, data):
+        try:
+            with open(self.json_path, "w", encoding="utf-8") as file:
+                json.dump(data, file, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+
+    def run_background_monitor(self):
+        if not self.camera_sources:
+            return
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        now_text = datetime.now().strftime("%H:%M:%S")
+        log_data = self.load_activity_log()
+
+        for camera in self.camera_sources:
+            camera_name = camera["name"]
+            url = camera["url"]
+            try:
+                cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+                if not cap.isOpened():
+                    continue
+                ret, frame = cap.read()
+                cap.release()
+                if not ret or frame is None:
+                    continue
+
+                detections = self.detector.detect(frame)
+                events = []
+                for detection in detections:
+                    class_name = detection.get("class_name", "")
+                    label = self.normalize_violation_name(class_name)
+                    if label and label not in {"Person"}:
+                        confidence_pct = int(float(detection.get("confidence", 0.0)) * 100)
+                        events.append((label, confidence_pct))
+
+                if not events:
+                    continue
+
+                unique_events = []
+                seen = set()
+                for label, confidence in events:
+                    if label not in seen:
+                        seen.add(label)
+                        unique_events.append(f"{label} • {confidence}%")
+
+                today_events = log_data.setdefault(today, {})
+                today_events[f"{now_text} ({camera_name})"] = f"{camera_name}: {', '.join(unique_events)}"
+                self.save_activity_log(log_data)
+            except Exception:
+                continue
+
+        self.refresh_dashboard_stats()
+
+    def get_dashboard_summary(self):
+        logs = self.load_activity_log()
+        total = 0
+        hardhat = 0
+        mask = 0
+        vest = 0
+        vehicle = 0
+
+        for day_events in logs.values():
+            if not isinstance(day_events, dict):
+                continue
+            for event in day_events.values():
+                if not isinstance(event, str):
+                    continue
+                text = event.lower()
+                if not text:
+                    continue
+                total += 1
+                if "без каски" in text:
+                    hardhat += 1
+                if "без маски" in text:
+                    mask += 1
+                if "без жилета" in text:
+                    vest += 1
+                if "vehicle" in text:
+                    vehicle += 1
+
+        return {
+            "total": total,
+            "hardhat": hardhat,
+            "mask": mask,
+            "vest": vest,
+            "vehicle": vehicle,
+            "cameras": len(self.camera_sources),
+        }
+
+    def refresh_dashboard_stats(self):
+        if not hasattr(self, "dashboard_stat_labels"):
+            return
+
+        summary = self.get_dashboard_summary()
+        self.dashboard_stat_labels["total"].setText(str(summary["total"]))
+        self.dashboard_stat_labels["hardhat"].setText(str(summary["hardhat"]))
+        self.dashboard_stat_labels["vehicle"].setText(str(summary["vehicle"]))
+        self.dashboard_stat_labels["cameras"].setText(str(summary["cameras"]))
+
+        log_entries = []
+        logs = self.load_activity_log()
+        for day in sorted(logs.keys(), reverse=True):
+            entries = logs.get(day, {})
+            for time_label, event in sorted(entries.items(), reverse=True):
+                log_entries.append(f"{day}  {time_label} — {event}")
+
+        self.dashboard_log_list.clear()
+
+        if not log_entries:
+            item = QListWidgetItem("Пока нарушений нет. Фоновый мониторинг работает в фоне.")
+            self.dashboard_log_list.addItem(item)
+            return
+
+        for entry in log_entries[:80]:
+            self.dashboard_log_list.addItem(entry)
+
     def build_dashboard(self):
         root = QWidget()
+        root.setObjectName("main_dashboard")
         root_layout = QHBoxLayout(root)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
@@ -207,11 +364,11 @@ class MainWindow(QMainWindow):
         topbar_layout = QHBoxLayout(topbar)
         topbar_layout.setContentsMargins(18, 12, 18, 12)
 
-        status = QLabel("● Система активна / ИИ анализирует")
+        status = QLabel("● Система активна / ИИ анализирует все камеры")
         status.setStyleSheet("color: #2ecc71; font-weight: 600; font-size: 13px;")
         topbar_layout.addWidget(status)
 
-        object_box = QPushButton("ЖК \"Высоты\", Зона 4")
+        object_box = QPushButton(f"Фон. мониторинг • {len(self.camera_sources)} камер")
         object_box.setObjectName("smallAction")
         topbar_layout.addStretch()
         topbar_layout.addWidget(object_box)
@@ -222,31 +379,31 @@ class MainWindow(QMainWindow):
         self.update_clock()
         topbar_layout.addWidget(self.clock_label)
 
-        bell = QPushButton("🔔 2")
-        bell.setObjectName("smallAction")
-        topbar_layout.addWidget(bell)
-
         content_layout.addWidget(topbar)
 
         stats_row = QHBoxLayout()
         stats_row.setSpacing(16)
-        for title, value, color in [
-            ("Безопасность объекта", "94%", "#2ecc71"),
-            ("Активных камер", "12", "#ff6b00"),
-            ("Алертов сегодня", "07", "#ff4d4d"),
-            ("Реакция ИИ", "3.1 мин", "#f1c40f"),
-        ]:
+        stat_cards = [
+            ("Всего нарушений", "total", "#ff4d4d"),
+            ("Без каски", "hardhat", "#ff9f43"),
+            ("Vehicle", "vehicle", "#f1c40f"),
+            ("Активных камер", "cameras", "#2ecc71"),
+        ]
+        self.dashboard_stat_labels = {}
+
+        for title, key, color in stat_cards:
             card = QFrame()
             card.setObjectName("card")
             card.setMinimumHeight(108)
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(16, 14, 16, 14)
-            label_value = QLabel(value)
+            label_value = QLabel("0")
             label_value.setStyleSheet(f"font-size: 32px; font-weight: 700; color: {color};")
             label_title = QLabel(title)
             label_title.setStyleSheet("font-size: 12px; color: #96a3b7;")
             card_layout.addWidget(label_value)
             card_layout.addWidget(label_title)
+            self.dashboard_stat_labels[key] = label_value
             stats_row.addWidget(card)
         content_layout.addLayout(stats_row)
 
@@ -259,108 +416,35 @@ class MainWindow(QMainWindow):
         left_panel_layout = QVBoxLayout(left_panel)
         left_panel_layout.setContentsMargins(18, 18, 18, 18)
 
-        left_title = QLabel("Камеры в реальном времени")
+        left_title = QLabel("Состояние камер")
         left_title.setStyleSheet("font-size: 18px; font-weight: 700; color: #f4f7fb;")
         left_panel_layout.addWidget(left_title)
 
-        video_mock = QFrame()
-        video_mock.setStyleSheet(
-            """
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #1b232a, stop:1 #11171d);
-                border: 1px solid #29323a;
-                border-radius: 16px;
-            }
-            """
-        )
-        video_mock.setMinimumHeight(320)
-        video_mock_layout = QVBoxLayout(video_mock)
-        video_mock_layout.setContentsMargins(18, 18, 18, 18)
+        self.camera_status_list = QListWidget()
+        self.camera_status_list.setMinimumHeight(180)
+        for camera in self.camera_sources:
+            item = QListWidgetItem(f"{camera['name']} • онлайн • {camera['url']}")
+            self.camera_status_list.addItem(item)
+        left_panel_layout.addWidget(self.camera_status_list)
 
-        mock_label = QLabel("LIVE • Камера 4 • Зона 4")
-        mock_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #f5f8ff; margin-top: 12px;")
-        video_mock_layout.addWidget(mock_label)
-        video_mock_layout.addStretch()
+        left_panel_layout.addSpacing(12)
 
-        overlay = QLabel(
-            "Каска: ДА | Жилет: ДА | ID: #104\n"
-            "Каска: НЕТ | Жилет: ДА | ID: #089 | НАРУШЕНИЕ\n"
-            "Площадка: West Gate / 18:44:21"
-        )
-        overlay.setStyleSheet(
-            "background: rgba(10, 13, 17, 0.55); border: 1px solid #2e3740; border-radius: 10px; "
-            "padding: 12px 14px; color: #e9edf6; font-size: 12px; line-height: 1.6;"
-        )
-        video_mock_layout.addWidget(overlay)
+        left_subtitle = QLabel("Лента событий")
+        left_subtitle.setStyleSheet("font-size: 14px; font-weight: 700; color: #f4f7fb;")
+        left_panel_layout.addWidget(left_subtitle)
 
-        left_panel_layout.addWidget(video_mock)
+        self.dashboard_log_list = QListWidget()
+        self.dashboard_log_list.setMinimumHeight(280)
+        left_panel_layout.addWidget(self.dashboard_log_list)
 
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(12)
-        for text, value, tone in [
-            ("Корректно", "11", "#2ecc71"),
-            ("Тревоги", "5", "#ff4d4d"),
-            ("Проверки", "3", "#f1c40f"),
-        ]:
-            mini = QFrame()
-            mini.setObjectName("card")
-            mini.setMinimumHeight(90)
-            mini_layout = QVBoxLayout(mini)
-            mini_layout.setContentsMargins(14, 10, 14, 10)
-            mini_value = QLabel(value)
-            mini_value.setStyleSheet(f"font-size: 26px; font-weight: 700; color: {tone};")
-            mini_label = QLabel(text)
-            mini_label.setStyleSheet("font-size: 11px; color: #adb8c5;")
-            mini_layout.addWidget(mini_value)
-            mini_layout.addWidget(mini_label)
-            bottom_row.addWidget(mini)
-        left_panel_layout.addLayout(bottom_row)
-
-        right_panel = QFrame()
-        right_panel.setObjectName("card")
-        right_panel.setMinimumWidth(360)
-        right_panel.setMaximumWidth(360)
-        right_panel_layout = QVBoxLayout(right_panel)
-        right_panel_layout.setContentsMargins(14, 14, 14, 14)
-
-        right_title = QLabel("Лента нарушений")
-        right_title.setStyleSheet("font-size: 18px; font-weight: 700; margin-bottom: 6px;")
-        right_panel_layout.addWidget(right_title)
-
-        events = [
-            ("11:34:19", "Без каски", "ID #089", "#FF4D4D"),
-            ("11:47:10", "Без жилета", "ID #104", "#FF9F43"),
-            ("11:52:06", "Опасная зона", "Камера 03", "#FF4D4D"),
-            ("12:08:32", "Проверка PPE", "ID #201", "#F1C40F"),
-        ]
-
-        for time_value, kind, identity, color in events:
-            event_card = QFrame()
-            event_card.setStyleSheet(
-                "QFrame { background: #11191f; border: 1px solid #232e39; border-radius: 12px; padding: 8px; }"
-            )
-            event_layout = QVBoxLayout(event_card)
-            event_layout.setContentsMargins(12, 12, 12, 12)
-
-            top = QLabel(f"{time_value}   {kind}")
-            top.setStyleSheet(f"font-size: 12px; font-weight: 700; color: {color};")
-            bottom = QLabel(identity)
-            bottom.setStyleSheet("font-size: 11px; color: #d7dfeb;")
-            event_layout.addWidget(top)
-            event_layout.addWidget(bottom)
-            event_layout.addWidget(QLabel("🧍 cropshot • лицо / грудь"))
-            right_panel_layout.addWidget(event_card)
-
-        right_panel_layout.addStretch()
-        main_grid.addWidget(left_panel, 3)
-        main_grid.addWidget(right_panel, 1)
+        main_grid.addWidget(left_panel, 1)
         content_layout.addLayout(main_grid)
 
         root_layout.addWidget(sidebar)
         root_layout.addWidget(content, 1)
         self.setCentralWidget(root)
         self.clock_timer.start(1000)
+        self.refresh_dashboard_stats()
 
     def show_main_menu(self):
         self.clear_window()
