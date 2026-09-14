@@ -295,100 +295,32 @@ class VideoPage(QWidget):
 
     def __init__(self, main_window):
         super().__init__()
-
         self.main_window = main_window
 
-        self.media_player = None
-        self.audio_output = None
         self.video_widget = None
-        self.check_timer = None
-        self.capture = None
-
         self.violations_list = None
         self.last_violations = []
-
-        self.detector = PPEDetector("models/ppe_model.pt")
-
-        self.output_dir = os.path.join("results", "live_frames")
-        os.makedirs(self.output_dir, exist_ok=True)
 
         self.camera_sources = get_camera_sources()
         self.selected_camera_index = 0
         self.camera_selector = None
+        self.current_worker = None  # ссылка на CameraWorker, к которому сейчас подписаны
 
         self.setStyleSheet(GLOBAL_STYLE)
-        self.capture = None
-        self.current_frame = None
-
-        # Постоянное чтение кадров с камеры
-        self.frame_timer = QTimer(self)
-        self.frame_timer.timeout.connect(self.read_live_frame)
-
-        # Анализ кадра YOLO каждые 5 секунд
-        self.check_timer = QTimer(self)
-        self.check_timer.timeout.connect(self.check_live_violations)
 
         self.setup_ui()
-        self.start_live_feed()
-
-        self.frame_timer.timeout.connect(self.read_live_frame)
-
-        # Анализ текущего кадра каждые 5 секунд
-        self.check_timer = QTimer(self)
-        self.check_timer.timeout.connect(self.check_live_violations)
+        self.attach_to_camera(self.selected_camera_index)
 
     def on_camera_selected(self, index):
         if index < 0:
             return
-        self.selected_camera_index = index
-        if self.camera_name is not None:
-            self.camera_name.setText(f"КАМЕРА {index + 1:02d}")
-        self.start_live_feed()
+        self.attach_to_camera(index)
 
     # --------------------------------------------------------
     # UI
     # --------------------------------------------------------
 
-    def read_live_frame(self):
 
-        if self.capture is None:
-            return
-
-        ok, frame = self.capture.read()
-
-        if not ok or frame is None:
-            return
-
-        # Сохраняем ПОСЛЕДНИЙ кадр
-        self.current_frame = frame.copy()
-
-        # OpenCV BGR -> Qt RGB
-        rgb = cv2.cvtColor(
-            frame,
-            cv2.COLOR_BGR2RGB
-        )
-
-        h, w, ch = rgb.shape
-        bytes_per_line = ch * w
-
-        image = QImage(
-            rgb.data,
-            w,
-            h,
-            bytes_per_line,
-            QImage.Format_RGB888
-        )
-
-        pixmap = QPixmap.fromImage(image)
-
-        # Показываем тот же поток, из которого берётся current_frame
-        scaled = pixmap.scaled(
-            self.video_widget.size(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
-        )
-
-        self.video_widget.setPixmap(scaled)
 
     def check_live_violations(self):
 
@@ -656,48 +588,59 @@ class VideoPage(QWidget):
     # LIVE FEED
     # --------------------------------------------------------
 
-    def start_live_feed(self):
-
-        source = get_camera_source(self.selected_camera_index)
-
-        if not source:
-            self.add_system_event("Источник камеры не найден")
+    def attach_to_camera(self, index):
+        """Отписывается от предыдущего воркера и подписывается на воркер выбранной камеры.
+        НЕ открывает новое RTSP-подключение — использует уже работающий поток из MainWindow."""
+        if index < 0 or index >= len(self.camera_sources):
             return
+
+        camera_name = self.camera_sources[index]["name"]
+        worker = self.main_window.camera_workers.get(camera_name)
+
+        # отписываемся от старого
+        if self.current_worker is not None:
+            try:
+                self.current_worker.frame_ready.disconnect(self.on_frame_ready)
+                self.current_worker.violation_found.disconnect(self.on_violation_found)
+            except (TypeError, RuntimeError):
+                pass
+
+        self.current_worker = worker
+        self.selected_camera_index = index
 
         if self.camera_name is not None:
-            camera_name = self.camera_sources[self.selected_camera_index]["name"]
             self.camera_name.setText(camera_name.upper())
 
-        if self.capture is not None:
-            self.capture.release()
-            self.capture = None
-
-        self.capture = cv2.VideoCapture(
-            source,
-            cv2.CAP_FFMPEG
-        )
-
-        if not self.capture.isOpened():
-            self.add_system_event(
-                "Не удалось открыть RTSP-камеру"
-            )
+        if worker is None:
+            self.add_system_event("Камера не найдена")
             return
 
-        self.capture.set(
-            cv2.CAP_PROP_BUFFERSIZE,
-            1
+        worker.frame_ready.connect(self.on_frame_ready)
+        worker.violation_found.connect(self.on_violation_found)
+        self.add_system_event("Подключено к фоновому потоку камеры")
+
+    def on_frame_ready(self, camera_name, frame):
+        if camera_name != self.camera_sources[self.selected_camera_index]["name"]:
+            return
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb.shape
+        bytes_per_line = ch * w
+        image = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(image)
+        self.video_widget.setPixmap(
+            pixmap.scaled(self.video_widget.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         )
 
-        self.add_system_event(
-            "Камера подключена"
+    def on_violation_found(self, camera_name, detections):
+        if camera_name != self.camera_sources[self.selected_camera_index]["name"]:
+            return
+        if not detections:
+            self.add_system_event("YOLO: объектов не обнаружено")
+            return
+        objects_text = ", ".join(
+            f"{d['class_name']} {d['confidence'] * 100:.0f}%" for d in detections
         )
-
-        # ВАЖНО:
-        # постоянно выкачиваем RTSP-поток
-        self.frame_timer.start(30)
-
-        # YOLO проверяет текущий кадр раз в 5 секунд
-        self.check_timer.start(5000)
+        self.add_system_event(f"YOLO: {objects_text}")
 
     # --------------------------------------------------------
     # SYSTEM EVENTS
@@ -739,188 +682,6 @@ class VideoPage(QWidget):
         self.violations_list.insertItem(self.violations_list.count(), item)
         self.violations_list.setItemWidget(item, widget)
 
-    # --------------------------------------------------------
-    # FRAME ANALYSIS
-    # --------------------------------------------------------
-
-    # --------------------------------------------------------
-    # VIOLATIONS
-    # --------------------------------------------------------
-
-    def check_live_violations(self):
-
-        if self.current_frame is None:
-            self.add_system_event(
-                "Кадр камеры ещё не получен"
-            )
-            return
-
-        # Берём последний кадр, который уже прочитал OpenCV.
-        # НИКАКОГО capture.read() здесь нет!
-        frame = self.current_frame.copy()
-
-        # ========================================================
-        # YOLO
-        # ========================================================
-
-        try:
-            detections = self.detector.detect(frame)
-
-        except Exception as exc:
-            self.add_system_event(
-                f"Ошибка YOLO: {exc}"
-            )
-            return
-
-        # ========================================================
-        # РИСУЕМ ВСЕ ОБЪЕКТЫ
-        # ========================================================
-
-        annotated = frame.copy()
-
-        CONF_THRESHOLD = 0.30
-
-        valid_detections = []
-
-        for detection in detections:
-
-            class_name = detection["class_name"]
-            confidence = detection["confidence"]
-            bbox = detection["bbox"]
-
-            if confidence < CONF_THRESHOLD:
-                continue
-
-            valid_detections.append(detection)
-
-            x1, y1, x2, y2 = map(int, bbox)
-
-            color = (0, 0, 255)
-
-            cv2.rectangle(
-                annotated,
-                (x1, y1),
-                (x2, y2),
-                color,
-                2
-            )
-
-            label = (
-                f"{class_name} "
-                f"{confidence * 100:.0f}%"
-            )
-
-            cv2.putText(
-                annotated,
-                label,
-                (x1, max(y1 - 10, 20)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                color,
-                2
-            )
-
-        # ========================================================
-        # ИНФОРМАЦИЯ
-        # ========================================================
-
-        now = datetime.now()
-
-        timestamp = now.strftime(
-            "%d.%m.%Y %H:%M:%S"
-        )
-
-        info_text = (
-            f"YOLO | {timestamp} | "
-            f"objects: {len(valid_detections)}"
-        )
-
-        cv2.putText(
-            annotated,
-            info_text,
-            (20, 35),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 0),
-            2
-        )
-
-        # ========================================================
-        # СОХРАНЕНИЕ
-        # ========================================================
-
-        file_name = (
-            f"debug_{now.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-        )
-
-        save_path = os.path.join(
-            self.output_dir,
-            file_name
-        )
-
-        saved = cv2.imwrite(
-            save_path,
-            annotated
-        )
-
-        # ========================================================
-        # КОНСОЛЬ
-        # ========================================================
-
-        print()
-        print("=" * 60)
-        print(f"YOLO CHECK: {timestamp}")
-        print(
-            f"Размер кадра: "
-            f"{frame.shape[1]}x{frame.shape[0]}"
-        )
-        print(
-            f"Найдено объектов: "
-            f"{len(valid_detections)}"
-        )
-
-        if valid_detections:
-
-            for detection in valid_detections:
-                print(
-                    f"  - "
-                    f"{detection['class_name']} | "
-                    f"{detection['confidence'] * 100:.1f}% | "
-                    f"bbox={detection['bbox']}"
-                )
-
-        else:
-
-            print(
-                "  YOLO ничего не обнаружил "
-                f"(confidence >= {CONF_THRESHOLD})"
-            )
-
-        print(f"Сохранено: {saved}")
-        print(f"Файл: {save_path}")
-        print("=" * 60)
-
-        # ========================================================
-        # ВРЕМЕННО ПОКАЗЫВАЕМ В UI
-        # ========================================================
-
-        if valid_detections:
-
-            objects_text = ", ".join(
-                f"{d['class_name']} "
-                f"{d['confidence'] * 100:.0f}%"
-                for d in valid_detections
-            )
-
-            self.add_system_event(
-                f"YOLO: {objects_text}"
-            )
-
-        else:
-
-            self.add_system_event(
-                "YOLO: объектов не обнаружено"
-            )
 
     def refresh_violation_list(self):
 
@@ -1000,17 +761,12 @@ class VideoPage(QWidget):
     # --------------------------------------------------------
 
     def closeEvent(self, event):
-
-        if self.frame_timer is not None:
-            self.frame_timer.stop()
-
-        if self.check_timer is not None:
-            self.check_timer.stop()
-
-        if self.capture is not None:
-            self.capture.release()
-            self.capture = None
-
+        if self.current_worker is not None:
+            try:
+                self.current_worker.frame_ready.disconnect(self.on_frame_ready)
+                self.current_worker.violation_found.disconnect(self.on_violation_found)
+            except (TypeError, RuntimeError):
+                pass
         super().closeEvent(event)
 
 

@@ -2,8 +2,7 @@ import json
 import os
 from datetime import datetime
 
-import cv2
-from PySide6.QtCore import QDateTime, QTimer
+from PySide6.QtCore import QDateTime, QTimer, QMutex
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -22,6 +21,7 @@ from config import get_camera_sources, load_cameras, load_monitoring_rules, save
 from core.detector import PPEDetector
 from gui.shift_page import ShiftPage
 from gui.video_page import UploadVideoPage, VideoPage
+from core.camera_worker import CameraWorker
 
 
 class MainWindow(QMainWindow):
@@ -122,16 +122,17 @@ class MainWindow(QMainWindow):
         )
         self.camera_sources = get_camera_sources()
         self.detector = PPEDetector("models/ppe_model.pt")
+        self.detector_lock = QMutex()
         self.json_path = os.path.join("results", "violations.json")
         os.makedirs(os.path.dirname(self.json_path), exist_ok=True)
         self.clock_label = None
-        self.monitor_timer = QTimer(self)
-        self.monitor_timer.timeout.connect(self.run_background_monitor)
-        self.monitor_timer.start(15000)
         self.clock_timer = QTimer(self)
         self.clock_timer.timeout.connect(self.update_clock)
         self.clock_timer.start(1000)
-        self.run_background_monitor()
+
+        self.camera_workers = {}  # camera_name -> CameraWorker
+        self.start_camera_workers()
+
         self.show_main_menu()
 
     def update_clock(self):
@@ -201,60 +202,66 @@ class MainWindow(QMainWindow):
         except OSError:
             pass
 
-    def run_background_monitor(self):
-        if not self.camera_sources:
-            return
+    def start_camera_workers(self):
+        """Запускает по одному воркеру на камеру. Вызывается один раз при старте."""
+        for camera in self.camera_sources:
+            worker = CameraWorker(camera, self.detector, self.detector_lock, detect_interval=5.0)
+            worker.violation_found.connect(self.on_violation_found)
+            worker.status_changed.connect(self.on_camera_status_changed)
+            worker.start()
+            self.camera_workers[camera["name"]] = worker
 
+    def on_camera_status_changed(self, camera_name, status):
+        # опционально: обновить индикатор в UI списка камер
+        pass
+
+    def on_violation_found(self, camera_name, detections):
+        """Заменяет старую логику из run_background_monitor —
+        получает уже готовые detections от воркера и пишет в лог."""
         rules = self.get_active_monitoring_rules()
         today = datetime.now().strftime("%Y-%m-%d")
         now_text = datetime.now().strftime("%H:%M:%S")
         log_data = self.load_activity_log()
 
-        for camera in self.camera_sources:
-            camera_name = camera["name"]
-            url = camera["url"]
-            try:
-                cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-                if not cap.isOpened():
-                    continue
-                ret, frame = cap.read()
-                cap.release()
-                if not ret or frame is None:
-                    continue
-
-                detections = self.detector.detect(frame)
-                events = []
-                for detection in detections:
-                    class_name = detection.get("class_name", "")
-                    normalized = self.normalize_violation_name(class_name)
-                    key = class_name
-                    if isinstance(normalized, str):
-                        key = normalized
-                    if not rules.get(key, True):
-                        continue
-                    if normalized in {"Person", "person"}:
-                        continue
-                    confidence_pct = int(float(detection.get("confidence", 0.0)) * 100)
-                    events.append((normalized, confidence_pct))
-
-                if not events:
-                    continue
-
-                unique_events = []
-                seen = set()
-                for label, confidence in events:
-                    label_key = str(label)
-                    if label_key not in seen:
-                        seen.add(label_key)
-                        unique_events.append(f"{label} • {confidence}%")
-
-                today_events = log_data.setdefault(today, {})
-                today_events[f"{now_text} ({camera_name})"] = f"{camera_name}: {', '.join(unique_events)}"
-                self.save_activity_log(log_data)
-            except Exception:
+        events = []
+        for detection in detections:
+            class_name = detection.get("class_name", "")
+            normalized = self.normalize_violation_name(class_name)
+            key = class_name if isinstance(normalized, str) else class_name
+            if not rules.get(key, True):
                 continue
+            if normalized in {"Person", "person"}:
+                continue
+            confidence_pct = int(float(detection.get("confidence", 0.0)) * 100)
+            events.append((normalized, confidence_pct))
+
+        if not events:
+            return
+
+        unique_events = []
+        seen = set()
+        for label, confidence in events:
+            label_key = str(label)
+            if label_key not in seen:
+                seen.add(label_key)
+                unique_events.append(f"{label} • {confidence}%")
+
+        today_events = log_data.setdefault(today, {})
+        today_events[f"{now_text} ({camera_name})"] = f"{camera_name}: {', '.join(unique_events)}"
+        self.save_activity_log(log_data)
 
         self.refresh_dashboard_stats()
+
+    def closeEvent(self, event):
+        for worker in self.camera_workers.values():
+            worker.stop()
+        super().closeEvent(event)
+
+    def restart_camera_workers(self):
+        for worker in self.camera_workers.values():
+            worker.stop()
+        self.camera_workers = {}
+        self.start_camera_workers()
 
     def get_dashboard_summary(self):
         logs = self.load_activity_log()
@@ -606,6 +613,7 @@ class MainWindow(QMainWindow):
         cameras.append({"name": text_name or f"Камера {len(cameras) + 1}", "url": text_url})
         save_cameras(cameras)
         self.camera_sources = get_camera_sources()
+        self.restart_camera_workers()
         self.show_settings_page()
 
     def _update_camera(self, index: int, name: str, url: str):
@@ -619,6 +627,7 @@ class MainWindow(QMainWindow):
         cameras[index] = {"name": text_name or f"Камера {index + 1}", "url": text_url}
         save_cameras(cameras)
         self.camera_sources = get_camera_sources()
+        self.restart_camera_workers()
 
     def _delete_camera(self, index: int):
         cameras = load_cameras()
@@ -627,4 +636,5 @@ class MainWindow(QMainWindow):
         del cameras[index]
         save_cameras(cameras)
         self.camera_sources = get_camera_sources()
+        self.restart_camera_workers()
         self.show_settings_page()
