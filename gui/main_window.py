@@ -147,6 +147,9 @@ class MainWindow(QMainWindow):
 
     def clear_window(self):
         self.clock_timer.stop()
+        self.dashboard_stat_labels = {}
+        self.dashboard_log_list = None
+        self.camera_status_list = None
         old_widget = self.centralWidget()
         if old_widget:
             old_widget.deleteLater()
@@ -218,6 +221,11 @@ class MainWindow(QMainWindow):
     def on_violation_found(self, camera_name, detections):
         """Заменяет старую логику из run_background_monitor —
         получает уже готовые detections от воркера и пишет в лог."""
+        if not hasattr(self, "dashboard_stat_labels"):
+            return
+        if not self.dashboard_stat_labels:
+            return
+
         rules = self.get_active_monitoring_rules()
         today = datetime.now().strftime("%Y-%m-%d")
         now_text = datetime.now().strftime("%H:%M:%S")
@@ -300,14 +308,20 @@ class MainWindow(QMainWindow):
         }
 
     def refresh_dashboard_stats(self):
-        if not hasattr(self, "dashboard_stat_labels"):
+        if not hasattr(self, "dashboard_stat_labels") or not self.dashboard_stat_labels:
+            return
+        if self.dashboard_log_list is None:
             return
 
         summary = self.get_dashboard_summary()
-        self.dashboard_stat_labels["total"].setText(str(summary["total"]))
-        self.dashboard_stat_labels["hardhat"].setText(str(summary["hardhat"]))
-        self.dashboard_stat_labels["vehicle"].setText(str(summary["vehicle"]))
-        self.dashboard_stat_labels["cameras"].setText(str(summary["cameras"]))
+        try:
+            self.dashboard_stat_labels["total"].setText(str(summary["total"]))
+            self.dashboard_stat_labels["hardhat"].setText(str(summary["hardhat"]))
+            self.dashboard_stat_labels["vehicle"].setText(str(summary["vehicle"]))
+            self.dashboard_stat_labels["cameras"].setText(str(summary["cameras"]))
+        except RuntimeError:
+            self.dashboard_stat_labels = {}
+            return
 
         log_entries = []
         logs = self.load_activity_log()
@@ -316,7 +330,11 @@ class MainWindow(QMainWindow):
             for time_label, event in sorted(entries.items(), reverse=True):
                 log_entries.append(f"{day}  {time_label} — {event}")
 
-        self.dashboard_log_list.clear()
+        try:
+            self.dashboard_log_list.clear()
+        except RuntimeError:
+            self.dashboard_log_list = None
+            return
 
         if not log_entries:
             item = QListWidgetItem("Пока нарушений нет. Фоновый мониторинг работает в фоне.")
