@@ -351,6 +351,13 @@ class MainWindow(QMainWindow):
             "total_shifts": total_shifts,
         }
 
+    def get_monthly_violation_counts(self):
+        monthly_counts = {}
+        for event_time, count in self.iter_violation_entries():
+            month_key = event_time.strftime("%Y-%m")
+            monthly_counts[month_key] = monthly_counts.get(month_key, 0) + count
+        return dict(sorted(monthly_counts.items()))
+
     def refresh_dashboard_stats(self):
         if not hasattr(self, "dashboard_stat_labels") or not self.dashboard_stat_labels:
             return

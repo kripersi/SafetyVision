@@ -1,4 +1,14 @@
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class ShiftPage(QWidget):
@@ -60,6 +70,46 @@ class ShiftPage(QWidget):
             card_layout.addWidget(title_label)
             metrics_grid.addWidget(card, index // 3, index % 3)
         layout.addLayout(metrics_grid)
+
+        chart = QFrame()
+        chart.setObjectName("card")
+        chart_layout = QVBoxLayout(chart)
+        chart_layout.setContentsMargins(18, 16, 18, 16)
+        chart_title = QLabel("Нарушения по месяцам")
+        chart_title.setStyleSheet("font-size: 18px; font-weight: 700;")
+        chart_layout.addWidget(chart_title)
+
+        monthly_counts = main_window.get_monthly_violation_counts()
+        if monthly_counts:
+            bars = QHBoxLayout()
+            bars.setSpacing(12)
+            maximum = max(monthly_counts.values())
+            for month, count in monthly_counts.items():
+                column = QVBoxLayout()
+                value_label = QLabel(str(count))
+                value_label.setAlignment(Qt.AlignHCenter)
+                value_label.setStyleSheet("font-size: 13px; font-weight: 700; color: #ff9f43;")
+
+                bar = QProgressBar()
+                bar.setOrientation(Qt.Vertical)
+                bar.setRange(0, maximum)
+                bar.setValue(count)
+                bar.setTextVisible(False)
+                bar.setMinimumHeight(220)
+                bar.setMinimumWidth(42)
+
+                month_label = QLabel(month[5:] + "." + month[:4])
+                month_label.setAlignment(Qt.AlignHCenter)
+                month_label.setStyleSheet("font-size: 11px; color: #adb8c5;")
+                column.addWidget(value_label)
+                column.addWidget(bar)
+                column.addWidget(month_label)
+                bars.addLayout(column)
+            bars.addStretch()
+            chart_layout.addLayout(bars)
+        else:
+            chart_layout.addWidget(QLabel("Пока нет нарушений для построения графика."))
+        layout.addWidget(chart)
 
         note = QLabel(
             f"Всего смен с записями: {summary['total_shifts']}. "
