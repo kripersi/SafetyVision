@@ -1,6 +1,8 @@
 from ultralytics import YOLO
 import cv2
 
+from config import DISPLAY_CLASS_NAMES
+
 
 class PPEDetector:
 
@@ -83,7 +85,7 @@ class PPEDetector:
             # Текст
             # ------------------------------------------------------
 
-            label = f"{class_name} {confidence:.2f}"
+            label = f"{DISPLAY_CLASS_NAMES.get(class_name, class_name)} {confidence:.2f}"
 
             # Размер текста
             (text_width, text_height), baseline = cv2.getTextSize(

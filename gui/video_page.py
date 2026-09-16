@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QSpacerItem,
 )
 
-from config import CAMERA_SOURCE, get_camera_source, get_camera_sources
+from config import CAMERA_SOURCE, DISPLAY_CLASS_NAMES, get_camera_source, get_camera_sources
 from core.detector import PPEDetector
 from core.video_analyzer import VideoAnalyzer
 
@@ -638,7 +638,8 @@ class VideoPage(QWidget):
             self.add_system_event("YOLO: объектов не обнаружено")
             return
         objects_text = ", ".join(
-            f"{d['class_name']} {d['confidence'] * 100:.0f}%" for d in detections
+            f"{DISPLAY_CLASS_NAMES.get(d['class_name'], d['class_name'])} "
+            f"{d['confidence'] * 100:.0f}%" for d in detections
         )
         self.add_system_event(f"YOLO: {objects_text}")
 

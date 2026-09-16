@@ -23,6 +23,7 @@ from config import (
     load_cameras,
     load_detect_interval,
     load_monitoring_rules,
+    DISPLAY_CLASS_NAMES,
     save_cameras,
     save_detect_interval,
     save_monitoring_rules,
@@ -178,20 +179,7 @@ class MainWindow(QMainWindow):
         return button
 
     def normalize_violation_name(self, class_name):
-        mapping = {
-            "Hardhat": "Hardhat",
-            "Mask": "Mask",
-            "NO-Hardhat": "Без каски",
-            "NO-Mask": "Без маски",
-            "NO-Safety Vest": "Без жилета",
-            "Safety Cone": "Safety Cone",
-            "Safety Vest": "Safety Vest",
-            "Vehicle": "Vehicle",
-            "vehicle": "Vehicle",
-            "machinery": "machinery",
-            "person": "Person",
-        }
-        return mapping.get(class_name, class_name)
+        return DISPLAY_CLASS_NAMES.get(class_name, class_name)
 
     def get_active_monitoring_rules(self):
         return load_monitoring_rules()
@@ -310,7 +298,7 @@ class MainWindow(QMainWindow):
                     mask += 1
                 if "без жилета" in text:
                     vest += 1
-                if "vehicle" in text:
+                if "vehicle" in text or "транспорт" in text:
                     vehicle += 1
 
         return {
@@ -444,7 +432,7 @@ class MainWindow(QMainWindow):
         stat_cards = [
             ("Всего нарушений", "total", "#ff4d4d"),
             ("Без каски", "hardhat", "#ff9f43"),
-            ("Vehicle", "vehicle", "#f1c40f"),
+            ("Транспорт", "vehicle", "#f1c40f"),
             ("Активных камер", "cameras", "#2ecc71"),
         ]
         self.dashboard_stat_labels = {}
@@ -551,16 +539,16 @@ class MainWindow(QMainWindow):
         layout.addLayout(header_row)
 
         options = [
-            "Hardhat",
-            "Mask",
-            "NO-Hardhat",
-            "NO-Mask",
-            "NO-Safety Vest",
-            "Person",
-            "Safety Cone",
-            "Safety Vest",
-            "machinery",
-            "vehicle",
+            ("Hardhat", "Каска"),
+            ("Mask", "Маска"),
+            ("NO-Hardhat", "Без каски"),
+            ("NO-Mask", "Без маски"),
+            ("NO-Safety Vest", "Без защитного жилета"),
+            ("Person", "Человек"),
+            ("Safety Cone", "Конус безопасности"),
+            ("Safety Vest", "Защитный жилет"),
+            ("machinery", "Машины и механизмы"),
+            ("vehicle", "Транспорт"),
         ]
         rules = self.get_active_monitoring_rules()
 
@@ -590,10 +578,10 @@ class MainWindow(QMainWindow):
         toggle_layout = QVBoxLayout(toggle_group)
         toggle_layout.setSpacing(10)
         toggle_layout.addWidget(QLabel("Следить за классами"))
-        for name in options:
-            checkbox = QCheckBox(name)
-            checkbox.setChecked(bool(rules.get(name, True)))
-            checkbox.stateChanged.connect(lambda state, key=name: self._save_monitoring_rule(key, state == 2))
+        for key, label in options:
+            checkbox = QCheckBox(label)
+            checkbox.setChecked(bool(rules.get(key, True)))
+            checkbox.stateChanged.connect(lambda state, key=key: self._save_monitoring_rule(key, state == 2))
             toggle_layout.addWidget(checkbox)
         layout.addWidget(toggle_group)
 
