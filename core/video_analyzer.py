@@ -19,6 +19,7 @@ class VideoAnalyzer:
 
         # Проверять видео каждые X секунд
         self.check_interval = 5
+        self.confidence_threshold = 0.4
 
     def analyze(self, video_path, output_path, json_path, progress_callback=None):
 
@@ -97,6 +98,9 @@ class VideoAnalyzer:
                 for detection in detections:
 
                     class_name = detection["class_name"]
+
+                    if detection["confidence"] < self.confidence_threshold:
+                        continue
 
                     if class_name not in self.violation_classes:
                         continue

@@ -21,10 +21,13 @@ from PySide6.QtWidgets import (
 from config import (
     get_camera_sources,
     load_cameras,
+    load_confidence_threshold,
     load_detect_interval,
     load_monitoring_rules,
     DISPLAY_CLASS_NAMES,
+    VIOLATION_CLASS_NAMES,
     save_cameras,
+    save_confidence_threshold,
     save_detect_interval,
     save_monitoring_rules,
 )
@@ -135,6 +138,8 @@ class MainWindow(QMainWindow):
         self.detector_lock = QMutex()
         self.json_path = os.path.join("results", "violations.json")
         os.makedirs(os.path.dirname(self.json_path), exist_ok=True)
+        self.shift_started_at = datetime.now()
+        self.camera_statuses = {camera["name"]: "connecting" for camera in self.camera_sources}
         self.clock_label = None
         self.clock_timer = QTimer(self)
         self.clock_timer.timeout.connect(self.update_clock)
@@ -205,6 +210,7 @@ class MainWindow(QMainWindow):
     def start_camera_workers(self):
         """Запускает по одному воркеру на камеру. Вызывается один раз при старте."""
         detect_interval = load_detect_interval()
+        self.camera_statuses = {camera["name"]: "connecting" for camera in self.camera_sources}
         for camera in self.camera_sources:
             worker = CameraWorker(
                 camera,
@@ -218,32 +224,42 @@ class MainWindow(QMainWindow):
             self.camera_workers[camera["name"]] = worker
 
     def on_camera_status_changed(self, camera_name, status):
-        # опционально: обновить индикатор в UI списка камер
-        pass
+        self.camera_statuses[camera_name] = status
+        if self.camera_status_list is None:
+            return
+        for index in range(self.camera_status_list.count()):
+            item = self.camera_status_list.item(index)
+            if item.data(256) != camera_name:
+                continue
+            label = "онлайн" if status == "connected" else "ошибка подключения"
+            item.setText(f"{camera_name} • {label}")
+            break
+        self.refresh_dashboard_stats()
 
     def on_violation_found(self, camera_name, detections):
         """Заменяет старую логику из run_background_monitor —
         получает уже готовые detections от воркера и пишет в лог."""
-        if not hasattr(self, "dashboard_stat_labels"):
-            return
-        if not self.dashboard_stat_labels:
-            return
-
         rules = self.get_active_monitoring_rules()
         today = datetime.now().strftime("%Y-%m-%d")
         now_text = datetime.now().strftime("%H:%M:%S")
         log_data = self.load_activity_log()
 
         events = []
+        confidence_threshold = load_confidence_threshold()
         for detection in detections:
             class_name = detection.get("class_name", "")
+            if class_name not in VIOLATION_CLASS_NAMES:
+                continue
+            confidence = float(detection.get("confidence", 0.0))
+            if confidence < confidence_threshold:
+                continue
             normalized = self.normalize_violation_name(class_name)
             key = class_name if isinstance(normalized, str) else class_name
             if not rules.get(key, True):
                 continue
             if normalized in {"Person", "person"}:
                 continue
-            confidence_pct = int(float(detection.get("confidence", 0.0)) * 100)
+            confidence_pct = int(confidence * 100)
             events.append((normalized, confidence_pct))
 
         if not events:
@@ -274,40 +290,40 @@ class MainWindow(QMainWindow):
         self.camera_workers = {}
         self.start_camera_workers()
 
-    def get_dashboard_summary(self):
+    def iter_violation_entries(self):
+        violation_labels = set(VIOLATION_CLASS_NAMES.values()) | {"Без жилета"}
         logs = self.load_activity_log()
-        total = 0
-        hardhat = 0
-        mask = 0
-        vest = 0
-        vehicle = 0
-
-        for day_events in logs.values():
+        for day, day_events in logs.items():
             if not isinstance(day_events, dict):
                 continue
-            for event in day_events.values():
+            for time_label, event in day_events.items():
                 if not isinstance(event, str):
                     continue
-                text = event.lower()
-                if not text:
+                count = sum(event.count(label) for label in violation_labels)
+                if count == 0:
                     continue
-                total += 1
-                if "без каски" in text:
-                    hardhat += 1
-                if "без маски" in text:
-                    mask += 1
-                if "без жилета" in text:
-                    vest += 1
-                if "vehicle" in text or "транспорт" in text:
-                    vehicle += 1
+                try:
+                    event_time = datetime.strptime(
+                        f"{day} {time_label[:8]}", "%Y-%m-%d %H:%M:%S"
+                    )
+                except ValueError:
+                    continue
+                yield event_time, count
+
+    def get_dashboard_summary(self):
+        now = datetime.now()
+        monthly = 0
+        shift = 0
+        for event_time, count in self.iter_violation_entries():
+            if event_time.year == now.year and event_time.month == now.month:
+                monthly += count
+            if event_time >= self.shift_started_at:
+                shift += count
 
         return {
-            "total": total,
-            "hardhat": hardhat,
-            "mask": mask,
-            "vest": vest,
-            "vehicle": vehicle,
-            "cameras": len(self.camera_sources),
+            "monthly": monthly,
+            "shift": shift,
+            "cameras": sum(status == "connected" for status in self.camera_statuses.values()),
         }
 
     def refresh_dashboard_stats(self):
@@ -318,9 +334,8 @@ class MainWindow(QMainWindow):
 
         summary = self.get_dashboard_summary()
         try:
-            self.dashboard_stat_labels["total"].setText(str(summary["total"]))
-            self.dashboard_stat_labels["hardhat"].setText(str(summary["hardhat"]))
-            self.dashboard_stat_labels["vehicle"].setText(str(summary["vehicle"]))
+            self.dashboard_stat_labels["monthly"].setText(str(summary["monthly"]))
+            self.dashboard_stat_labels["shift"].setText(str(summary["shift"]))
             self.dashboard_stat_labels["cameras"].setText(str(summary["cameras"]))
         except RuntimeError:
             self.dashboard_stat_labels = {}
@@ -328,9 +343,12 @@ class MainWindow(QMainWindow):
 
         log_entries = []
         logs = self.load_activity_log()
+        violation_labels = set(VIOLATION_CLASS_NAMES.values()) | {"Без жилета"}
         for day in sorted(logs.keys(), reverse=True):
             entries = logs.get(day, {})
             for time_label, event in sorted(entries.items(), reverse=True):
+                if not isinstance(event, str) or not any(label in event for label in violation_labels):
+                    continue
                 log_entries.append(f"{day}  {time_label} — {event}")
 
         try:
@@ -430,9 +448,8 @@ class MainWindow(QMainWindow):
         stats_row = QHBoxLayout()
         stats_row.setSpacing(16)
         stat_cards = [
-            ("Всего нарушений", "total", "#ff4d4d"),
-            ("Без каски", "hardhat", "#ff9f43"),
-            ("Транспорт", "vehicle", "#f1c40f"),
+            ("Нарушений за месяц", "monthly", "#ff4d4d"),
+            ("Нарушений за смену", "shift", "#ff9f43"),
             ("Активных камер", "cameras", "#2ecc71"),
         ]
         self.dashboard_stat_labels = {}
@@ -469,7 +486,10 @@ class MainWindow(QMainWindow):
         self.camera_status_list = QListWidget()
         self.camera_status_list.setMinimumHeight(180)
         for camera in self.camera_sources:
-            item = QListWidgetItem(f"{camera['name']} • онлайн • {camera['url']}")
+            status = self.camera_statuses.get(camera["name"], "connecting")
+            status_label = "онлайн" if status == "connected" else "ошибка подключения" if status == "error" else "подключение"
+            item = QListWidgetItem(f"{camera['name']} • {status_label}")
+            item.setData(256, camera["name"])
             self.camera_status_list.addItem(item)
         left_panel_layout.addWidget(self.camera_status_list)
 
@@ -574,6 +594,28 @@ class MainWindow(QMainWindow):
         interval_layout.addStretch()
         layout.addWidget(interval_group)
 
+        confidence_group = QWidget()
+        confidence_layout = QHBoxLayout(confidence_group)
+        confidence_layout.setContentsMargins(0, 0, 0, 0)
+        confidence_layout.setSpacing(10)
+        confidence_layout.addWidget(QLabel("Уведомлять при уверенности от"))
+
+        confidence_spin = QDoubleSpinBox()
+        confidence_spin.setRange(0.0, 100.0)
+        confidence_spin.setSingleStep(5.0)
+        confidence_spin.setDecimals(0)
+        confidence_spin.setSuffix(" %")
+        confidence_spin.setValue(load_confidence_threshold() * 100)
+        confidence_layout.addWidget(confidence_spin)
+
+        save_confidence_button = QPushButton("Сохранить")
+        save_confidence_button.clicked.connect(
+            lambda: self._save_confidence_threshold(confidence_spin.value())
+        )
+        confidence_layout.addWidget(save_confidence_button)
+        confidence_layout.addStretch()
+        layout.addWidget(confidence_group)
+
         toggle_group = QWidget()
         toggle_layout = QVBoxLayout(toggle_group)
         toggle_layout.setSpacing(10)
@@ -650,6 +692,9 @@ class MainWindow(QMainWindow):
         save_detect_interval(interval)
         for worker in self.camera_workers.values():
             worker.set_detect_interval(interval)
+
+    def _save_confidence_threshold(self, percentage: float):
+        save_confidence_threshold(percentage / 100.0)
 
     def _add_camera_from_config(self, name: str, url: str):
         text_name = (name or "").strip()

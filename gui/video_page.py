@@ -27,7 +27,13 @@ from PySide6.QtWidgets import (
     QSpacerItem,
 )
 
-from config import CAMERA_SOURCE, DISPLAY_CLASS_NAMES, get_camera_source, get_camera_sources
+from config import (
+    CAMERA_SOURCE,
+    DISPLAY_CLASS_NAMES,
+    get_camera_source,
+    get_camera_sources,
+    load_confidence_threshold,
+)
 from core.detector import PPEDetector
 from core.video_analyzer import VideoAnalyzer
 
@@ -277,6 +283,7 @@ class VideoWorker(QThread):
         try:
             detector = PPEDetector(self.model_path)
             analyzer = VideoAnalyzer(detector)
+            analyzer.confidence_threshold = load_confidence_threshold()
             violations = analyzer.analyze(
                 self.video_path,
                 self.output_video,
