@@ -41,24 +41,24 @@ from core.video_analyzer import VideoAnalyzer
 # THEME — сдержанная, промышленная
 # ============================================================
 
-BG = "#0f1114"
-PANEL = "#161a1f"
-PANEL_2 = "#1c2127"
-PANEL_3 = "#232932"
+BG = "#0e1014"
+PANEL = "#161a20"
+PANEL_2 = "#1d2229"
+PANEL_3 = "#262c34"
 
-LINE = "#2a3138"
-LINE_2 = "#343c45"
+LINE = "#2a313a"
+LINE_2 = "#3a424d"
 
-TEXT = "#e6e9ed"
-TEXT_2 = "#9aa3ad"
-TEXT_3 = "#5f6873"
+TEXT = "#f5f7fa"
+TEXT_2 = "#a9b2bd"
+TEXT_3 = "#6b7480"
 
-ACCENT = "#c8722a"
-ACCENT_2 = "#e08a3c"
+ACCENT = "#ff7a1a"
+ACCENT_2 = "#ff9440"
 
-OK = "#4a9e6a"
-ERR = "#b85050"
-WARN = "#b08a3c"
+OK = "#4ec27a"
+ERR = "#e5534b"
+WARN = "#e0a13a"
 
 VIDEO_BG = "#05070a"
 
@@ -69,20 +69,18 @@ QWidget {{
     font-family: "Inter", "Segoe UI", "Helvetica Neue", sans-serif;
     font-size: 13px;
 }}
-
 QLabel {{
     background: transparent;
     color: {TEXT};
 }}
-
 QPushButton {{
     background: {PANEL_2};
     color: {TEXT};
     border: 1px solid {LINE};
-    border-radius: 3px;
-    padding: 8px 16px;
+    border-radius: 10px;
+    padding: 9px 16px;
     font-size: 12px;
-    font-weight: 500;
+    font-weight: 600;
     letter-spacing: 0.2px;
 }}
 QPushButton:hover {{
@@ -96,54 +94,49 @@ QPushButton:disabled {{
     color: {TEXT_3};
     border-color: {LINE};
 }}
-
 QPushButton#primaryButton {{
     background: {ACCENT};
     border: 1px solid {ACCENT};
-    color: #16110b;
-    font-weight: 600;
+    color: #ffffff;
+    font-weight: 700;
 }}
 QPushButton#primaryButton:hover {{
     background: {ACCENT_2};
     border-color: {ACCENT_2};
 }}
-
 QPushButton#ghostButton {{
     background: transparent;
     border: 1px solid {LINE};
     color: {TEXT_2};
-    padding: 7px 14px;
+    padding: 8px 14px;
 }}
 QPushButton#ghostButton:hover {{
-    border-color: {LINE_2};
+    border-color: {ACCENT};
     color: {TEXT};
     background: {PANEL};
 }}
-
 QPushButton#toolbarButton {{
     background: transparent;
     border: 1px solid {LINE};
     padding: 6px 12px;
     font-size: 11px;
     color: {TEXT_2};
+    border-radius: 8px;
 }}
 QPushButton#toolbarButton:hover {{
     color: {TEXT};
-    border-color: {LINE_2};
+    border-color: {ACCENT};
 }}
-
 QFrame#card {{
     background: {PANEL};
     border: 1px solid {LINE};
-    border-radius: 4px;
+    border-radius: 14px;
 }}
-
 QFrame#videoCard {{
     background: {PANEL};
     border: 1px solid {LINE};
-    border-radius: 4px;
+    border-radius: 14px;
 }}
-
 QListWidget {{
     background: transparent;
     border: none;
@@ -159,22 +152,38 @@ QListWidget::item {{
 QListWidget::item:selected {{
     background: transparent;
 }}
-
 QProgressBar {{
     background: {PANEL_3};
     border: none;
-    border-radius: 2px;
-    height: 4px;
+    border-radius: 3px;
+    height: 6px;
     text-align: center;
 }}
 QProgressBar::chunk {{
     background: {ACCENT};
-    border-radius: 2px;
+    border-radius: 3px;
 }}
-
+QComboBox {{
+    background: {PANEL_2};
+    color: {TEXT};
+    border: 1px solid {LINE};
+    border-radius: 8px;
+    padding: 6px 10px;
+    min-width: 150px;
+}}
+QComboBox:hover {{
+    border-color: {ACCENT};
+}}
+QComboBox QAbstractItemView {{
+    background: {PANEL_2};
+    color: {TEXT};
+    border: 1px solid {LINE};
+    selection-background-color: {ACCENT};
+    outline: none;
+}}
 QScrollBar:vertical {{
     background: transparent;
-    width: 6px;
+    width: 7px;
     margin: 0;
 }}
 QScrollBar::handle:vertical {{
@@ -183,7 +192,7 @@ QScrollBar::handle:vertical {{
     min-height: 30px;
 }}
 QScrollBar::handle:vertical:hover {{
-    background: #4a535e;
+    background: {ACCENT};
 }}
 QScrollBar::add-line:vertical,
 QScrollBar::sub-line:vertical {{
@@ -393,6 +402,7 @@ class VideoPage(QWidget):
         f.setPointSize(20)
         f.setWeight(QFont.DemiBold)
         title.setFont(f)
+        title.setStyleSheet(f"color: {TEXT};")
 
         subtitle = QLabel("Контроль объекта в реальном времени")
         subtitle.setStyleSheet(f"color: {TEXT_3}; font-size: 12px;")

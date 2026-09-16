@@ -17,13 +17,21 @@ class ShiftPage(QWidget):
         self.main_window = main_window
         self.setStyleSheet(
             """
-            QWidget { background: #0f1419; color: #edf3fb; }
-            QLabel { color: #edf3fb; }
+            QWidget { background: #0e1014; color: #f5f7fa; font-family: 'Inter', 'Segoe UI', sans-serif; }
+            QLabel { color: #f5f7fa; background: transparent; }
             QPushButton {
-                background: #171d24; color: #edf3fb;
-                border: 1px solid #2a313a; border-radius: 12px; padding: 10px 14px;
+                background: #1d2229; color: #f5f7fa;
+                border: 1px solid #2a313a; border-radius: 10px; padding: 10px 14px;
+                font-weight: 600;
             }
-            QFrame.card { background: #151b20; border: 1px solid #212b34; border-radius: 16px; }
+            QPushButton:hover { background: #262c34; border-color: #3a424d; }
+            QPushButton:pressed { background: #161a20; }
+            QFrame.card { background: #161a20; border: 1px solid #232a32; border-radius: 14px; }
+            QProgressBar {
+                background: #13171c; border: 1px solid #232a32;
+                border-radius: 4px; text-align: center;
+            }
+            QProgressBar::chunk { background: #ff7a1a; border-radius: 3px; }
             """
         )
 
@@ -33,7 +41,7 @@ class ShiftPage(QWidget):
 
         header = QHBoxLayout()
         title = QLabel("Отчеты")
-        title.setStyleSheet("font-size: 28px; font-weight: 700;")
+        title.setStyleSheet("font-size: 28px; font-weight: 700; color: #f5f7fa;")
         header.addWidget(title)
         header.addStretch()
         back_button = QPushButton("Назад")
@@ -42,16 +50,16 @@ class ShiftPage(QWidget):
         layout.addLayout(header)
 
         description = QLabel("Статистика нарушений экипировки по данным мониторинга")
-        description.setStyleSheet("color: #96a3b7; font-size: 13px;")
+        description.setStyleSheet("color: #a9b2bd; font-size: 13px;")
         layout.addWidget(description)
 
         summary = main_window.get_report_summary()
         metrics = [
-            ("Всего нарушений", summary["all_time"], "#ff4d4d"),
-            ("За текущий месяц", summary["month"], "#ff9f43"),
-            ("За текущую смену", summary["shift"], "#f1c40f"),
-            ("За последние 2 часа", summary["last_two_hours"], "#e67e22"),
-            ("Процент нарушений за смену", f"{summary['shift_percent']:.1f}%", "#2ecc71"),
+            ("Всего нарушений", summary["all_time"], "#e5534b"),
+            ("За текущий месяц", summary["month"], "#ff7a1a"),
+            ("За текущую смену", summary["shift"], "#e0a13a"),
+            ("За последние 2 часа", summary["last_two_hours"], "#ff9440"),
+            ("Процент нарушений за смену", f"{summary['shift_percent']:.1f}%", "#4ec27a"),
         ]
 
         metrics_grid = QGridLayout()
@@ -88,7 +96,7 @@ class ShiftPage(QWidget):
                 column = QVBoxLayout()
                 value_label = QLabel(str(count))
                 value_label.setAlignment(Qt.AlignHCenter)
-                value_label.setStyleSheet("font-size: 13px; font-weight: 700; color: #ff9f43;")
+                value_label.setStyleSheet("font-size: 13px; font-weight: 700; color: #ff7a1a;")
 
                 bar = QProgressBar()
                 bar.setOrientation(Qt.Vertical)
@@ -100,7 +108,7 @@ class ShiftPage(QWidget):
 
                 month_label = QLabel(month[5:] + "." + month[:4])
                 month_label.setAlignment(Qt.AlignHCenter)
-                month_label.setStyleSheet("font-size: 11px; color: #adb8c5;")
+                month_label.setStyleSheet("font-size: 11px; color: #a9b2bd;")
                 column.addWidget(value_label)
                 column.addWidget(bar)
                 column.addWidget(month_label)
@@ -116,6 +124,6 @@ class ShiftPage(QWidget):
             "В расчет входят только: без каски, без маски и без защитного жилета."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("color: #96a3b7; font-size: 12px;")
+        note.setStyleSheet("color: #6b7480; font-size: 12px;")
         layout.addWidget(note)
         layout.addStretch()
