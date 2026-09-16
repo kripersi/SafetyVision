@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QStackedLayout,
     QVBoxLayout,
     QWidget,
     QSizePolicy,
@@ -271,6 +272,7 @@ def tag(text, color=TEXT_2):
 class VideoWorker(QThread):
     finished = Signal(list)
     error = Signal(str)
+    progress_changed = Signal(float)
 
     def __init__(self, video_path, model_path, output_video, output_json):
         super().__init__()
@@ -283,11 +285,13 @@ class VideoWorker(QThread):
         try:
             detector = PPEDetector(self.model_path)
             analyzer = VideoAnalyzer(detector)
+            analyzer.check_interval = 1
             analyzer.confidence_threshold = load_confidence_threshold()
             violations = analyzer.analyze(
                 self.video_path,
                 self.output_video,
                 self.output_json,
+                progress_callback=self.progress_changed.emit,
             )
             self.finished.emit(violations)
         except Exception as e:
@@ -746,6 +750,7 @@ class UploadVideoPage(QWidget):
         self.media_player = None
         self.audio_output = None
         self.video_widget = None
+        self.annotated_video_path = None
         self.check_timer = None
         self.capture = None
 
@@ -841,52 +846,17 @@ class UploadVideoPage(QWidget):
         self.video_label.setFont(mono_font(11, QFont.Medium))
         self.video_label.setStyleSheet(f"color: {TEXT_2};")
 
+        formats = QLabel("MP4  ·  AVI  ·  MOV  ·  MKV")
+        formats.setFont(mono_font(9, QFont.Medium))
+        formats.setStyleSheet(f"color: {TEXT_3}; letter-spacing: 1px;")
+
         file_box.addWidget(file_caption)
         file_box.addWidget(self.video_label)
+        file_box.addWidget(formats)
 
         cl.addLayout(file_box)
 
         root.addWidget(controls_card)
-
-        # --- UPLOAD AREA ---
-        upload_block = QFrame()
-        upload_block.setObjectName("card")
-        upload_block.setMinimumHeight(200)
-
-        ul = QVBoxLayout(upload_block)
-        ul.setContentsMargins(32, 32, 32, 32)
-        ul.setSpacing(10)
-        ul.addStretch()
-
-        upload_title = QLabel("Видеозапись объекта")
-        upload_title.setAlignment(Qt.AlignCenter)
-        ff = upload_title.font()
-        ff.setPointSize(16)
-        ff.setWeight(QFont.DemiBold)
-        upload_title.setFont(ff)
-
-        ul.addWidget(upload_title)
-
-        upload_description = QLabel(
-            "Выберите файл с локального диска для последующего анализа."
-        )
-        upload_description.setAlignment(Qt.AlignCenter)
-        upload_description.setStyleSheet(
-            f"color: {TEXT_2}; font-size: 12px;"
-        )
-        ul.addWidget(upload_description)
-
-        formats = QLabel("MP4   ·   AVI   ·   MOV   ·   MKV")
-        formats.setAlignment(Qt.AlignCenter)
-        formats.setFont(mono_font(10, QFont.Medium))
-        formats.setStyleSheet(
-            f"color: {TEXT_3}; letter-spacing: 2px; margin-top: 6px;"
-        )
-        ul.addWidget(formats)
-
-        ul.addStretch()
-
-        root.addWidget(upload_block)
 
         # --- PROGRESS ---
         progress_header = QHBoxLayout()
@@ -911,9 +881,65 @@ class UploadVideoPage(QWidget):
         self.progress.setValue(0)
         root.addWidget(self.progress)
 
+        analysis_row = QHBoxLayout()
+        analysis_row.setSpacing(16)
+
+        playback_card = QFrame()
+        playback_card.setObjectName("card")
+        playback_card.setMinimumWidth(520)
+        playback_layout = QVBoxLayout(playback_card)
+        playback_layout.setContentsMargins(14, 12, 14, 12)
+        playback_layout.setSpacing(10)
+
+        playback_header = QHBoxLayout()
+        playback_header.addWidget(section_label("Обработанное видео"))
+        playback_header.addStretch()
+        self.play_processed_button = QPushButton("Воспроизвести")
+        self.play_processed_button.setObjectName("primaryButton")
+        self.play_processed_button.setEnabled(False)
+        self.play_processed_button.clicked.connect(self.play_annotated_video)
+        playback_header.addWidget(self.play_processed_button)
+        playback_layout.addLayout(playback_header)
+
+        video_stack = QWidget()
+        video_stack_layout = QStackedLayout(video_stack)
+        video_stack_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.processed_preview = QLabel("Ожидание обработанного видео")
+        self.processed_preview.setAlignment(Qt.AlignCenter)
+        self.processed_preview.setMinimumHeight(220)
+        self.processed_preview.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding,
+        )
+        self.processed_preview.setStyleSheet(
+            f"background: {VIDEO_BG}; border: 1px solid {LINE}; color: {TEXT_3};"
+        )
+        video_stack_layout.addWidget(self.processed_preview)
+
+        self.processed_video_widget = QVideoWidget()
+        self.processed_video_widget.setMinimumHeight(220)
+        self.processed_video_widget.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Expanding,
+        )
+        self.processed_video_widget.setStyleSheet(
+            f"background: {VIDEO_BG}; border: 1px solid {LINE};"
+        )
+        video_stack_layout.addWidget(self.processed_video_widget)
+        self.video_stack_layout = video_stack_layout
+        playback_layout.addWidget(video_stack)
+        analysis_row.addWidget(playback_card, 2)
+
+        self.audio_output = QAudioOutput(self)
+        self.media_player = QMediaPlayer(self)
+        self.media_player.setAudioOutput(self.audio_output)
+        self.media_player.setVideoOutput(self.processed_video_widget)
+
         # --- RESULTS ---
         result_card = QFrame()
         result_card.setObjectName("card")
+        result_card.setMinimumWidth(360)
 
         rl = QVBoxLayout(result_card)
         rl.setContentsMargins(18, 18, 18, 18)
@@ -927,11 +953,12 @@ class UploadVideoPage(QWidget):
         rl.addWidget(hairline())
 
         self.violations_list = QListWidget()
-        self.violations_list.setMinimumHeight(230)
+        self.violations_list.setMinimumHeight(220)
         self.violations_list.setSpacing(0)
         rl.addWidget(self.violations_list)
 
-        root.addWidget(result_card, 1)
+        analysis_row.addWidget(result_card, 1)
+        root.addLayout(analysis_row, 1)
 
     # --------------------------------------------------------
     # SELECT
@@ -975,6 +1002,9 @@ class UploadVideoPage(QWidget):
         self.progress.setValue(0)
         self.progress_value.setText("0%")
         self.violations_list.clear()
+        self.play_processed_button.setEnabled(False)
+        self.media_player.stop()
+        self.video_stack_layout.setCurrentWidget(self.processed_preview)
 
         self.add_result_event(
             "Анализ запущен",
@@ -990,7 +1020,13 @@ class UploadVideoPage(QWidget):
         )
         self.worker.finished.connect(self.analysis_finished)
         self.worker.error.connect(self.analysis_error)
+        self.worker.progress_changed.connect(self.update_analysis_progress)
         self.worker.start()
+
+    def update_analysis_progress(self, value):
+        progress = max(0, min(100, int(value)))
+        self.progress.setValue(progress)
+        self.progress_value.setText(f"{progress}%")
 
     # --------------------------------------------------------
     # RESULTS
@@ -1048,6 +1084,35 @@ class UploadVideoPage(QWidget):
         self.progress.setValue(100)
         self.progress_value.setText("100%")
         self.violations_list.clear()
+        self.annotated_video_path = os.path.abspath("results/annotated_video.mp4")
+        if os.path.exists(self.annotated_video_path):
+            capture = cv2.VideoCapture(self.annotated_video_path)
+            ok, frame = capture.read()
+            capture.release()
+            if ok and frame is not None:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                height, width, channels = rgb.shape
+                image = QImage(
+                    rgb.data,
+                    width,
+                    height,
+                    channels * width,
+                    QImage.Format_RGB888,
+                ).copy()
+                self.processed_preview.setPixmap(
+                    QPixmap.fromImage(image).scaled(
+                        self.processed_preview.size(),
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation,
+                    )
+                )
+            self.media_player.setSource(QUrl.fromLocalFile(self.annotated_video_path))
+            self.play_processed_button.setEnabled(True)
+            self.add_result_event(
+                "Видео обработано",
+                "Размеченное видео готово к просмотру ниже.",
+                OK,
+            )
 
         if not violations:
             self.add_result_event(
@@ -1084,6 +1149,12 @@ class UploadVideoPage(QWidget):
             "Анализ завершён",
             f"Обнаружено событий: {len(violations)}",
         )
+
+    def play_annotated_video(self):
+        if not self.annotated_video_path or not os.path.exists(self.annotated_video_path):
+            return
+        self.video_stack_layout.setCurrentWidget(self.processed_video_widget)
+        self.media_player.play()
 
     def analysis_error(self, error):
 
