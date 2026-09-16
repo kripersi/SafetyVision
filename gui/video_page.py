@@ -41,24 +41,24 @@ from core.video_analyzer import VideoAnalyzer
 # THEME — сдержанная, промышленная
 # ============================================================
 
-BG = "#0e1014"
-PANEL = "#161a20"
-PANEL_2 = "#1d2229"
-PANEL_3 = "#262c34"
+BG = "#0f1114"
+PANEL = "#161a1f"
+PANEL_2 = "#1c2127"
+PANEL_3 = "#232932"
 
-LINE = "#2a313a"
-LINE_2 = "#3a424d"
+LINE = "#2a3138"
+LINE_2 = "#343c45"
 
-TEXT = "#f5f7fa"
-TEXT_2 = "#a9b2bd"
-TEXT_3 = "#6b7480"
+TEXT = "#e6e9ed"
+TEXT_2 = "#9aa3ad"
+TEXT_3 = "#5f6873"
 
-ACCENT = "#ff7a1a"
-ACCENT_2 = "#ff9440"
+ACCENT = "#c8722a"
+ACCENT_2 = "#e08a3c"
 
-OK = "#4ec27a"
-ERR = "#e5534b"
-WARN = "#e0a13a"
+OK = "#4a9e6a"
+ERR = "#b85050"
+WARN = "#b08a3c"
 
 VIDEO_BG = "#05070a"
 
@@ -69,18 +69,20 @@ QWidget {{
     font-family: "Inter", "Segoe UI", "Helvetica Neue", sans-serif;
     font-size: 13px;
 }}
+
 QLabel {{
     background: transparent;
     color: {TEXT};
 }}
+
 QPushButton {{
     background: {PANEL_2};
     color: {TEXT};
     border: 1px solid {LINE};
-    border-radius: 10px;
-    padding: 9px 16px;
+    border-radius: 3px;
+    padding: 8px 16px;
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 500;
     letter-spacing: 0.2px;
 }}
 QPushButton:hover {{
@@ -94,49 +96,54 @@ QPushButton:disabled {{
     color: {TEXT_3};
     border-color: {LINE};
 }}
+
 QPushButton#primaryButton {{
     background: {ACCENT};
     border: 1px solid {ACCENT};
-    color: #ffffff;
-    font-weight: 700;
+    color: #16110b;
+    font-weight: 600;
 }}
 QPushButton#primaryButton:hover {{
     background: {ACCENT_2};
     border-color: {ACCENT_2};
 }}
+
 QPushButton#ghostButton {{
     background: transparent;
     border: 1px solid {LINE};
     color: {TEXT_2};
-    padding: 8px 14px;
+    padding: 7px 14px;
 }}
 QPushButton#ghostButton:hover {{
-    border-color: {ACCENT};
+    border-color: {LINE_2};
     color: {TEXT};
     background: {PANEL};
 }}
+
 QPushButton#toolbarButton {{
     background: transparent;
     border: 1px solid {LINE};
     padding: 6px 12px;
     font-size: 11px;
     color: {TEXT_2};
-    border-radius: 8px;
 }}
 QPushButton#toolbarButton:hover {{
     color: {TEXT};
-    border-color: {ACCENT};
+    border-color: {LINE_2};
 }}
+
 QFrame#card {{
     background: {PANEL};
     border: 1px solid {LINE};
-    border-radius: 14px;
+    border-radius: 4px;
 }}
+
 QFrame#videoCard {{
     background: {PANEL};
     border: 1px solid {LINE};
-    border-radius: 14px;
+    border-radius: 4px;
 }}
+
 QListWidget {{
     background: transparent;
     border: none;
@@ -152,38 +159,22 @@ QListWidget::item {{
 QListWidget::item:selected {{
     background: transparent;
 }}
+
 QProgressBar {{
     background: {PANEL_3};
     border: none;
-    border-radius: 3px;
-    height: 6px;
+    border-radius: 2px;
+    height: 4px;
     text-align: center;
 }}
 QProgressBar::chunk {{
     background: {ACCENT};
-    border-radius: 3px;
+    border-radius: 2px;
 }}
-QComboBox {{
-    background: {PANEL_2};
-    color: {TEXT};
-    border: 1px solid {LINE};
-    border-radius: 8px;
-    padding: 6px 10px;
-    min-width: 150px;
-}}
-QComboBox:hover {{
-    border-color: {ACCENT};
-}}
-QComboBox QAbstractItemView {{
-    background: {PANEL_2};
-    color: {TEXT};
-    border: 1px solid {LINE};
-    selection-background-color: {ACCENT};
-    outline: none;
-}}
+
 QScrollBar:vertical {{
     background: transparent;
-    width: 7px;
+    width: 6px;
     margin: 0;
 }}
 QScrollBar::handle:vertical {{
@@ -192,7 +183,7 @@ QScrollBar::handle:vertical {{
     min-height: 30px;
 }}
 QScrollBar::handle:vertical:hover {{
-    background: {ACCENT};
+    background: #4a535e;
 }}
 QScrollBar::add-line:vertical,
 QScrollBar::sub-line:vertical {{
@@ -402,10 +393,10 @@ class VideoPage(QWidget):
         f.setPointSize(20)
         f.setWeight(QFont.DemiBold)
         title.setFont(f)
-        title.setStyleSheet(f"color: {TEXT};")
+        title.setStyleSheet("color: #e6e9ed; background: #000000;")
 
         subtitle = QLabel("Контроль объекта в реальном времени")
-        subtitle.setStyleSheet(f"color: {TEXT_3}; font-size: 12px;")
+        subtitle.setStyleSheet(f"color: {TEXT_3}; background: #000000; font-size: 12px;")
 
         tb.addWidget(title)
         tb.addWidget(subtitle)
@@ -419,11 +410,6 @@ class VideoPage(QWidget):
         sep.setFixedWidth(1)
         sep.setStyleSheet(f"background: {LINE};")
         header.addWidget(sep)
-
-        back_button = QPushButton("← Назад")
-        back_button.setObjectName("ghostButton")
-        back_button.clicked.connect(self.main_window.show_main_menu)
-        header.addWidget(back_button)
 
         root.addLayout(header)
         root.addWidget(hairline())
@@ -450,9 +436,6 @@ class VideoPage(QWidget):
         cam_name.setStyleSheet(f"color: {TEXT}; letter-spacing: 1.6px;")
         self.camera_name = cam_name
 
-        cam_zone = QLabel("Зона 4 · Западный въезд")
-        cam_zone.setStyleSheet(f"color: {TEXT_3}; font-size: 11px;")
-
         self.camera_selector = QComboBox()
         self.camera_selector.setStyleSheet(
             f"QComboBox {{ background: {PANEL_2}; color: {TEXT}; border: 1px solid {LINE}; padding: 6px 10px; min-width: 150px; }}"
@@ -464,13 +447,13 @@ class VideoPage(QWidget):
         self.camera_selector.currentIndexChanged.connect(self.on_camera_selected)
 
         cam_bar.addWidget(cam_name)
-        cam_bar.addWidget(cam_zone)
         cam_bar.addStretch()
         cam_bar.addWidget(self.camera_selector)
         cam_bar.addWidget(tag("LIVE", ERR))
 
         toolbar_button = QPushButton("Настройки")
         toolbar_button.setObjectName("toolbarButton")
+        toolbar_button.clicked.connect(self.main_window.show_settings_page)
         cam_bar.addWidget(toolbar_button)
 
         vl.addLayout(cam_bar)
@@ -549,57 +532,6 @@ class VideoPage(QWidget):
 
         root.addLayout(content, 1)
 
-        # --- METRICS ROW ---
-        metrics_card = QFrame()
-        metrics_card.setObjectName("card")
-        ml = QHBoxLayout(metrics_card)
-        ml.setContentsMargins(24, 18, 24, 18)
-        ml.setSpacing(0)
-
-        metrics = [
-            ("94", "%", "уровень безопасности", OK),
-            ("07", "", "нарушений сегодня", ERR),
-            ("04", "", "проверок выполнено", WARN),
-            ("01", "", "камера требует внимания", ACCENT),
-        ]
-
-        for i, (val, unit, label, color) in enumerate(metrics):
-            cell = QWidget()
-            cl = QVBoxLayout(cell)
-            cl.setContentsMargins(0, 0, 0, 0)
-            cl.setSpacing(4)
-
-            top = QHBoxLayout()
-            top.setSpacing(2)
-            top.setContentsMargins(0, 0, 0, 0)
-
-            v = QLabel(val)
-            v.setFont(mono_font(22, QFont.Bold))
-            v.setStyleSheet(f"color: {color};")
-            top.addWidget(v)
-            if unit:
-                u = QLabel(unit)
-                u.setFont(mono_font(13, QFont.Bold))
-                u.setStyleSheet(f"color: {color}; margin-top: 6px;")
-                top.addWidget(u)
-            top.addStretch()
-
-            t = QLabel(label.upper())
-            t.setFont(mono_font(9, QFont.Medium))
-            t.setStyleSheet(f"color: {TEXT_3}; letter-spacing: 1.2px;")
-
-            cl.addLayout(top)
-            cl.addWidget(t)
-
-            ml.addWidget(cell, 1)
-
-            if i < len(metrics) - 1:
-                v_sep = QFrame()
-                v_sep.setFixedWidth(1)
-                v_sep.setStyleSheet(f"background: {LINE};")
-                ml.addWidget(v_sep)
-
-        root.addWidget(metrics_card)
 
     # --------------------------------------------------------
     # LIVE FEED
@@ -624,6 +556,10 @@ class VideoPage(QWidget):
 
         self.current_worker = worker
         self.selected_camera_index = index
+
+        if self.violations_list is not None:
+            self.violations_list.clear()
+            self.update_events_count()
 
         if self.camera_name is not None:
             self.camera_name.setText(camera_name.upper())
@@ -664,6 +600,10 @@ class VideoPage(QWidget):
     # SYSTEM EVENTS
     # --------------------------------------------------------
 
+    def update_events_count(self):
+        if self.events_count is not None and self.violations_list is not None:
+            self.events_count.setText(f"{self.violations_list.count():02d}")
+
     def add_system_event(self, text):
 
         if self.violations_list is None:
@@ -699,6 +639,7 @@ class VideoPage(QWidget):
         item.setSizeHint(widget.sizeHint())
         self.violations_list.insertItem(self.violations_list.count(), item)
         self.violations_list.setItemWidget(item, widget)
+        self.update_events_count()
 
 
     def refresh_violation_list(self):
@@ -707,6 +648,7 @@ class VideoPage(QWidget):
             return
 
         self.violations_list.clear()
+        self.update_events_count()
 
         for v in self.last_violations:
             item = QListWidgetItem()
@@ -773,6 +715,8 @@ class VideoPage(QWidget):
             item.setSizeHint(widget.sizeHint())
             self.violations_list.addItem(item)
             self.violations_list.setItemWidget(item, widget)
+
+        self.update_events_count()
 
     # --------------------------------------------------------
     # CLOSE
@@ -850,22 +794,18 @@ class UploadVideoPage(QWidget):
         f.setPointSize(20)
         f.setWeight(QFont.DemiBold)
         title.setFont(f)
+        title.setStyleSheet("color: #e6e9ed; background: #000000;")
 
         subtitle = QLabel(
             "Загрузка архива и автоматическое обнаружение нарушений"
         )
-        subtitle.setStyleSheet(f"color: {TEXT_3}; font-size: 12px;")
+        subtitle.setStyleSheet(f"color: {TEXT_3}; background: #000000; font-size: 12px;")
 
         tb.addWidget(title)
         tb.addWidget(subtitle)
 
         header.addWidget(title_block)
         header.addStretch()
-
-        back_button = QPushButton("← Назад")
-        back_button.setObjectName("ghostButton")
-        back_button.clicked.connect(self.main_window.show_main_menu)
-        header.addWidget(back_button)
 
         root.addLayout(header)
         root.addWidget(hairline())
@@ -1030,7 +970,7 @@ class UploadVideoPage(QWidget):
         os.makedirs("results", exist_ok=True)
 
         output_video = "results/annotated_video.mp4"
-        output_json = "results/violations.json"
+        output_json = "results/video_analysis_violations.json"
 
         self.progress.setValue(0)
         self.progress_value.setText("0%")

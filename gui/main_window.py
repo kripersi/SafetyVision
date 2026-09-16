@@ -47,209 +47,89 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(
             """
             QMainWindow {
-                background: #0e1014;
-                color: #f5f7fa;
+                background: #0f1115;
+                color: #edf2f7;
             }
             QWidget {
                 background: transparent;
-                color: #f5f7fa;
-                font-family: 'Inter', 'Segoe UI', sans-serif;
-                font-size: 13px;
+                color: #edf2f7;
+                font-family: 'Segoe UI', sans-serif;
             }
             QLabel {
-                color: #f5f7fa;
-                background: transparent;
+                color: #edf2f7;
             }
-
-            /* ---------- BUTTONS ---------- */
             QPushButton {
-                border: 1px solid #2a313a;
-                border-radius: 10px;
-                background: #1d2229;
-                color: #f5f7fa;
+                border: 1px solid #2b3038;
+                border-radius: 12px;
+                background: #1a1e25;
+                color: #edf2f7;
                 padding: 10px 16px;
                 font-size: 13px;
                 font-weight: 600;
-                letter-spacing: 0.2px;
             }
             QPushButton:hover {
-                background: #262c34;
-                border-color: #3a424d;
+                background: #222833;
             }
-            QPushButton:pressed {
-                background: #161a20;
-            }
-            QPushButton:disabled {
-                color: #6b7480;
-                border-color: #2a313a;
-            }
-
             QPushButton#navButton {
                 background: transparent;
                 border: 1px solid transparent;
                 text-align: left;
                 padding: 12px 14px;
-                border-radius: 10px;
+                border-radius: 12px;
                 font-size: 13px;
-                font-weight: 600;
-                color: #a9b2bd;
+                color: #c7ced9;
             }
             QPushButton#navButton:hover {
-                background: #1a1f26;
-                border: 1px solid #2a313a;
-                color: #f5f7fa;
+                background: #171c22;
+                border: 1px solid #2a2f3a;
             }
-            QPushButton#navButton[active="true"] {
-                background: #ff7a1a;
-                color: #ffffff;
-                border: 1px solid #ff7a1a;
+            QPushButton#navButton.active {
+                background: #ff6b00;
+                color: #fff;
+                border: 1px solid #ff6b00;
             }
-            QPushButton#navButton[active="true"]:hover {
-                background: #ff9440;
-                border-color: #ff9440;
-            }
-
             QPushButton#actionPrimary {
-                background: #ff7a1a;
-                border: 1px solid #ff7a1a;
-                color: #ffffff;
-                font-weight: 700;
+                background: #ff6b00;
+                border: 1px solid #ff6b00;
+                color: #fff;
             }
-            QPushButton#actionPrimary:hover {
-                background: #ff9440;
-                border-color: #ff9440;
-            }
-            QPushButton#actionPrimary:pressed {
-                background: #c95a08;
-            }
-
             QPushButton#smallAction {
-                background: #1a1f26;
-                border: 1px solid #2a313a;
+                background: #141a20;
+                border: 1px solid #2a2f38;
                 padding: 8px 12px;
                 font-size: 12px;
-                color: #a9b2bd;
-                border-radius: 8px;
             }
-            QPushButton#smallAction:hover {
-                color: #f5f7fa;
-                border-color: #3a424d;
-            }
-
-            /* ---------- CARDS ---------- */
             QFrame.card {
-                background: #161a20;
+                background: #171b20;
                 border: 1px solid #232a32;
-                border-radius: 14px;
+                border-radius: 16px;
             }
             QFrame.cardHeader {
                 background: rgba(255,255,255,0.02);
                 border: 1px solid #222933;
-                border-radius: 10px;
-            }
-
-            /* ---------- LISTS ---------- */
-            QListWidget {
-                background: #13171c;
-                border: 1px solid #202733;
                 border-radius: 12px;
+            }
+            QListWidget {
+                background: #11151a;
+                border: 1px solid #202733;
+                border-radius: 14px;
                 padding: 8px;
-                outline: none;
             }
             QListWidget::item {
                 border-radius: 10px;
-                background: #1a1f26;
-                border: 1px solid #232a33;
-                margin: 5px 0;
-                padding: 4px 6px;
-                color: #f5f7fa;
+                background: #171c23;
+                border: 1px solid #202833;
+                margin: 6px 0;
             }
-            QListWidget::item:selected {
-                background: #262c34;
-                border-color: #ff7a1a;
-                color: #ffffff;
-            }
-            QListWidget::item:hover {
-                background: #1f242b;
-            }
-
-            /* ---------- SCROLLBAR ---------- */
-            QScrollBar:vertical {
-                background: transparent;
-                width: 8px;
-                margin: 4px 2px;
-            }
-            QScrollBar::handle:vertical {
-                background: #3a424d;
-                border-radius: 4px;
-                min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #ff7a1a;
-            }
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {
-                height: 0;
-            }
-            QScrollBar::add-page:vertical,
-            QScrollBar::sub-page:vertical {
-                background: transparent;
-            }
-
-            /* ---------- INPUTS ---------- */
-            QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox {
-                background: #13171c;
-                border: 1px solid #2a313a;
-                border-radius: 8px;
-                color: #f5f7fa;
-                padding: 8px 10px;
-                selection-background-color: #ff7a1a;
-            }
-            QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus {
-                border-color: #ff7a1a;
-            }
-            QComboBox QAbstractItemView {
-                background: #1d2229;
-                color: #f5f7fa;
-                border: 1px solid #2a313a;
-                selection-background-color: #ff7a1a;
-                outline: none;
-            }
-
-            /* ---------- CHECKBOX ---------- */
-            QCheckBox {
-                color: #f5f7fa;
-                spacing: 10px;
-                font-size: 13px;
-            }
-            QCheckBox::indicator {
-                width: 18px;
-                height: 18px;
-                border-radius: 5px;
-                border: 1px solid #3a424d;
-                background: #13171c;
-            }
-            QCheckBox::indicator:hover {
-                border-color: #ff7a1a;
-            }
-            QCheckBox::indicator:checked {
-                background: #ff7a1a;
-                border-color: #ff7a1a;
-                image: none;
-            }
-
-            /* ---------- PROGRESS ---------- */
             QProgressBar {
                 border: 1px solid #2a3039;
-                border-radius: 6px;
+                border-radius: 8px;
                 background: #10151a;
                 text-align: center;
-                color: #a9b2bd;
-                height: 6px;
             }
             QProgressBar::chunk {
-                background: #ff7a1a;
-                border-radius: 5px;
+                background: #ff6b00;
+                border-radius: 7px;
             }
             """
         )
@@ -302,6 +182,47 @@ class MainWindow(QMainWindow):
             button.clicked.connect(callback)
         button.setMinimumHeight(46)
         return button
+
+    def build_sidebar(self, active_key):
+        sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
+        sidebar.setMinimumWidth(240)
+        sidebar.setMaximumWidth(240)
+        sidebar.setStyleSheet(
+            "QWidget#sidebar { background: #20252b; border-right: 1px solid #343a40; }"
+        )
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(18, 22, 18, 18)
+        sidebar_layout.setSpacing(10)
+
+        logo = QLabel("СТРОЙОКО AI")
+        logo.setStyleSheet("font-size: 22px; font-weight: 800; color: #ffffff; margin-bottom: 20px;")
+        sidebar_layout.addWidget(logo)
+
+        nav_items = [
+            ("home", "Главная", self.show_main_menu),
+            ("live", "Камеры (Live)", self.show_live_page),
+            ("upload", "Загрузить видео", self.show_upload_page),
+            ("reports", "Отчеты", self.show_shift_page),
+        ]
+        for key, text, callback in nav_items:
+            sidebar_layout.addWidget(self.make_nav_button(text, callback, key == active_key))
+
+        sidebar_layout.addStretch()
+        sidebar_layout.addWidget(
+            self.make_nav_button("Настройки", self.show_settings_page, active_key == "settings")
+        )
+        sidebar_layout.addWidget(self.make_nav_button("Выйти", self.close, False))
+        return sidebar
+
+    def set_page(self, page, active_key):
+        shell = QWidget()
+        shell_layout = QHBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+        shell_layout.addWidget(self.build_sidebar(active_key))
+        shell_layout.addWidget(page, 1)
+        self.setCentralWidget(shell)
 
     def normalize_violation_name(self, class_name):
         return DISPLAY_CLASS_NAMES.get(class_name, class_name)
@@ -523,47 +444,7 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        sidebar = QWidget()
-        sidebar.setObjectName("sidebar")
-        sidebar.setMinimumWidth(240)
-        sidebar.setMaximumWidth(240)
-        sidebar_style = """
-            QWidget#sidebar {
-                background: #12161b;
-                border: 1px solid #1d252d;
-                border-left: none;
-                border-top: none;
-                border-bottom: none;
-            }
-        """
-        sidebar.setStyleSheet(sidebar_style)
-        sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(18, 18, 18, 18)
-        sidebar_layout.setSpacing(14)
-
-        logo = QLabel("🛡️ СтройОко AI")
-        logo.setStyleSheet(
-            "font-size: 24px; font-weight: 700; color: #f8f9fb; margin-bottom: 18px;"
-        )
-        sidebar_layout.addWidget(logo)
-
-        nav_buttons = [
-            ("🏠 Главная", self.show_main_menu, True),
-            ("📹 Камеры (Live)", self.show_live_page, False),
-            ("📤 Загрузить видео", self.show_upload_page, False),
-            ("📊 Отчеты", self.show_shift_page, False),
-        ]
-
-        for text, callback, active in nav_buttons:
-            btn = self.make_nav_button(text, callback, active)
-            sidebar_layout.addWidget(btn)
-
-        sidebar_layout.addStretch()
-
-        settings = self.make_nav_button("⚙️ Настройки", self.show_settings_page, False)
-        exit_button = self.make_nav_button("⏻ Выйти", self.close, False)
-        sidebar_layout.addWidget(settings)
-        sidebar_layout.addWidget(exit_button)
+        sidebar = self.build_sidebar("home")
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
@@ -668,22 +549,22 @@ class MainWindow(QMainWindow):
 
     def show_live_page(self):
         self.clear_window()
-        self.setCentralWidget(VideoPage(self))
+        self.set_page(VideoPage(self), "live")
 
     def show_video_page(self):
         self.show_live_page()
 
     def show_upload_page(self):
         self.clear_window()
-        self.setCentralWidget(UploadVideoPage(self))
+        self.set_page(UploadVideoPage(self), "upload")
 
     def show_settings_page(self):
         self.clear_window()
-        self.setCentralWidget(self.build_settings_page())
+        self.set_page(self.build_settings_page(), "settings")
 
     def show_shift_page(self):
         self.clear_window()
-        self.setCentralWidget(ShiftPage(self))
+        self.set_page(ShiftPage(self), "reports")
 
     def build_settings_page(self):
         page = QWidget()
@@ -703,9 +584,6 @@ class MainWindow(QMainWindow):
         header_row.addWidget(title)
         header_row.addStretch()
 
-        back_button = QPushButton("← Назад")
-        back_button.clicked.connect(self.show_main_menu)
-        header_row.addWidget(back_button)
         layout.addLayout(header_row)
 
         options = [
