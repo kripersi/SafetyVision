@@ -5,6 +5,7 @@ from datetime import datetime
 from PySide6.QtCore import QDateTime, QTimer, QMutex
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -17,7 +18,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import get_camera_sources, load_cameras, load_monitoring_rules, save_cameras, save_monitoring_rules
+from config import (
+    get_camera_sources,
+    load_cameras,
+    load_detect_interval,
+    load_monitoring_rules,
+    save_cameras,
+    save_detect_interval,
+    save_monitoring_rules,
+)
 from core.detector import PPEDetector
 from gui.shift_page import ShiftPage
 from gui.video_page import UploadVideoPage, VideoPage
@@ -207,8 +216,14 @@ class MainWindow(QMainWindow):
 
     def start_camera_workers(self):
         """Запускает по одному воркеру на камеру. Вызывается один раз при старте."""
+        detect_interval = load_detect_interval()
         for camera in self.camera_sources:
-            worker = CameraWorker(camera, self.detector, self.detector_lock, detect_interval=5.0)
+            worker = CameraWorker(
+                camera,
+                self.detector,
+                self.detector_lock,
+                detect_interval=detect_interval,
+            )
             worker.violation_found.connect(self.on_violation_found)
             worker.status_changed.connect(self.on_camera_status_changed)
             worker.start()
@@ -549,6 +564,28 @@ class MainWindow(QMainWindow):
         ]
         rules = self.get_active_monitoring_rules()
 
+        interval_group = QWidget()
+        interval_layout = QHBoxLayout(interval_group)
+        interval_layout.setContentsMargins(0, 0, 0, 0)
+        interval_layout.setSpacing(10)
+        interval_layout.addWidget(QLabel("Проверять нарушения каждые"))
+
+        interval_spin = QDoubleSpinBox()
+        interval_spin.setRange(0.1, 3600.0)
+        interval_spin.setSingleStep(0.5)
+        interval_spin.setDecimals(1)
+        interval_spin.setSuffix(" сек.")
+        interval_spin.setValue(load_detect_interval())
+        interval_layout.addWidget(interval_spin)
+
+        save_interval_button = QPushButton("Сохранить")
+        save_interval_button.clicked.connect(
+            lambda: self._save_detect_interval(interval_spin.value())
+        )
+        interval_layout.addWidget(save_interval_button)
+        interval_layout.addStretch()
+        layout.addWidget(interval_group)
+
         toggle_group = QWidget()
         toggle_layout = QVBoxLayout(toggle_group)
         toggle_layout.setSpacing(10)
@@ -620,6 +657,11 @@ class MainWindow(QMainWindow):
         rules = self.get_active_monitoring_rules()
         rules[key] = value
         save_monitoring_rules(rules)
+
+    def _save_detect_interval(self, interval: float):
+        save_detect_interval(interval)
+        for worker in self.camera_workers.values():
+            worker.set_detect_interval(interval)
 
     def _add_camera_from_config(self, name: str, url: str):
         text_name = (name or "").strip()
