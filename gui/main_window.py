@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from PySide6.QtCore import QDateTime, QTimer, QMutex
 from PySide6.QtWidgets import (
@@ -248,16 +248,12 @@ class MainWindow(QMainWindow):
         confidence_threshold = load_confidence_threshold()
         for detection in detections:
             class_name = detection.get("class_name", "")
-            if class_name not in VIOLATION_CLASS_NAMES:
-                continue
             confidence = float(detection.get("confidence", 0.0))
             if confidence < confidence_threshold:
                 continue
             normalized = self.normalize_violation_name(class_name)
             key = class_name if isinstance(normalized, str) else class_name
             if not rules.get(key, True):
-                continue
-            if normalized in {"Person", "person"}:
                 continue
             confidence_pct = int(confidence * 100)
             events.append((normalized, confidence_pct))
@@ -317,13 +313,42 @@ class MainWindow(QMainWindow):
         for event_time, count in self.iter_violation_entries():
             if event_time.year == now.year and event_time.month == now.month:
                 monthly += count
-            if event_time >= self.shift_started_at:
+            if event_time.date() == now.date():
                 shift += count
 
         return {
             "monthly": monthly,
             "shift": shift,
             "cameras": sum(status == "connected" for status in self.camera_statuses.values()),
+        }
+
+    def get_report_summary(self):
+        now = datetime.now()
+        month = 0
+        shift = 0
+        last_two_hours = 0
+        all_time = 0
+        shift_dates = set()
+
+        for event_time, count in self.iter_violation_entries():
+            all_time += count
+            shift_dates.add(event_time.date())
+            if event_time.year == now.year and event_time.month == now.month:
+                month += count
+            if event_time.date() == now.date():
+                shift += count
+            if event_time >= now - timedelta(hours=2):
+                last_two_hours += count
+
+        total_shifts = len(shift_dates)
+        shift_percent = (shift / all_time * 100) if all_time else 0.0
+        return {
+            "all_time": all_time,
+            "month": month,
+            "shift": shift,
+            "last_two_hours": last_two_hours,
+            "shift_percent": shift_percent,
+            "total_shifts": total_shifts,
         }
 
     def refresh_dashboard_stats(self):
@@ -343,11 +368,10 @@ class MainWindow(QMainWindow):
 
         log_entries = []
         logs = self.load_activity_log()
-        violation_labels = set(VIOLATION_CLASS_NAMES.values()) | {"Без жилета"}
         for day in sorted(logs.keys(), reverse=True):
             entries = logs.get(day, {})
             for time_label, event in sorted(entries.items(), reverse=True):
-                if not isinstance(event, str) or not any(label in event for label in violation_labels):
+                if not isinstance(event, str):
                     continue
                 log_entries.append(f"{day}  {time_label} — {event}")
 
@@ -400,7 +424,6 @@ class MainWindow(QMainWindow):
             ("🏠 Главная", self.show_main_menu, True),
             ("📹 Камеры (Live)", self.show_live_page, False),
             ("📤 Загрузить видео", self.show_upload_page, False),
-            ("🗺️ Карта объекта", self.show_shift_page, False),
             ("📊 Отчеты", self.show_shift_page, False),
         ]
 
@@ -411,9 +434,9 @@ class MainWindow(QMainWindow):
         sidebar_layout.addStretch()
 
         settings = self.make_nav_button("⚙️ Настройки", self.show_settings_page, False)
-        profile = self.make_nav_button("👤 Профиль прораба", None, False)
+        exit_button = self.make_nav_button("⏻ Выйти", self.close, False)
         sidebar_layout.addWidget(settings)
-        sidebar_layout.addWidget(profile)
+        sidebar_layout.addWidget(exit_button)
 
         content = QWidget()
         content_layout = QVBoxLayout(content)

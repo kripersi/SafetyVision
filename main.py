@@ -10,7 +10,7 @@ def main():
 
     window = MainWindow()
 
-    window.show()
+    window.showFullScreen()
 
     sys.exit(
         app.exec()

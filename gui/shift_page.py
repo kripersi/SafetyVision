@@ -1,143 +1,71 @@
-from PySide6.QtWidgets import (
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QProgressBar,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 
 class ShiftPage(QWidget):
-
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
         self.setStyleSheet(
             """
-            QWidget {
-                background: #0f1419;
-                color: #edf3fb;
-            }
+            QWidget { background: #0f1419; color: #edf3fb; }
             QLabel { color: #edf3fb; }
             QPushButton {
-                background: #171d24;
-                color: #edf3fb;
-                border: 1px solid #2a313a;
-                border-radius: 12px;
-                padding: 10px 14px;
+                background: #171d24; color: #edf3fb;
+                border: 1px solid #2a313a; border-radius: 12px; padding: 10px 14px;
             }
-            QFrame.card {
-                background: #151b20;
-                border: 1px solid #212b34;
-                border-radius: 16px;
-            }
-            QProgressBar {
-                border: 1px solid #2d3742;
-                border-radius: 8px;
-                background: #0d1318;
-            }
-            QProgressBar::chunk {
-                background: #2ecc71;
-                border-radius: 7px;
-            }
+            QFrame.card { background: #151b20; border: 1px solid #212b34; border-radius: 16px; }
             """
         )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(18)
+        layout.setSpacing(20)
 
         header = QHBoxLayout()
-        title = QLabel("📊 Отчеты / Статистика")
+        title = QLabel("Отчеты")
         title.setStyleSheet("font-size: 28px; font-weight: 700;")
         header.addWidget(title)
         header.addStretch()
-
-        back_button = QPushButton("← Назад")
-        back_button.clicked.connect(self.main_window.show_main_menu)
+        back_button = QPushButton("Назад")
+        back_button.clicked.connect(main_window.show_main_menu)
         header.addWidget(back_button)
         layout.addLayout(header)
 
-        metrics = QHBoxLayout()
-        metrics.setSpacing(16)
-        for value, label, color in [
-            ("96%", "Сводка по смене", "#2ecc71"),
-            ("28", "Проверок PPE", "#ff6b00"),
-            ("03", "Небезопасных зон", "#ff4d4d"),
-            ("2.4h", "Среднее время реакции", "#f1c40f"),
-        ]:
+        description = QLabel("Статистика нарушений экипировки по данным мониторинга")
+        description.setStyleSheet("color: #96a3b7; font-size: 13px;")
+        layout.addWidget(description)
+
+        summary = main_window.get_report_summary()
+        metrics = [
+            ("Всего нарушений", summary["all_time"], "#ff4d4d"),
+            ("За текущий месяц", summary["month"], "#ff9f43"),
+            ("За текущую смену", summary["shift"], "#f1c40f"),
+            ("За последние 2 часа", summary["last_two_hours"], "#e67e22"),
+            ("Процент нарушений за смену", f"{summary['shift_percent']:.1f}%", "#2ecc71"),
+        ]
+
+        metrics_grid = QGridLayout()
+        metrics_grid.setSpacing(16)
+        for index, (label, value, color) in enumerate(metrics):
             card = QFrame()
             card.setObjectName("card")
-            card.setMinimumHeight(100)
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(16, 12, 16, 12)
-            val = QLabel(value)
-            val.setStyleSheet(f"font-size: 28px; font-weight: 700; color: {color};")
-            lab = QLabel(label)
-            lab.setStyleSheet("font-size: 12px; color: #adb8c5;")
-            card_layout.addWidget(val)
-            card_layout.addWidget(lab)
-            metrics.addWidget(card)
-        layout.addLayout(metrics)
+            card_layout.setContentsMargins(18, 16, 18, 16)
+            value_label = QLabel(str(value))
+            value_label.setStyleSheet(f"font-size: 30px; font-weight: 700; color: {color};")
+            title_label = QLabel(label)
+            title_label.setWordWrap(True)
+            title_label.setStyleSheet("font-size: 12px; color: #adb8c5;")
+            card_layout.addWidget(value_label)
+            card_layout.addWidget(title_label)
+            metrics_grid.addWidget(card, index // 3, index % 3)
+        layout.addLayout(metrics_grid)
 
-        main_row = QHBoxLayout()
-        main_row.setSpacing(18)
-
-        chart = QFrame()
-        chart.setObjectName("card")
-        chart.setMinimumHeight(360)
-        chart_layout = QVBoxLayout(chart)
-        chart_layout.setContentsMargins(18, 18, 18, 18)
-        chart_title = QLabel("Распределение рисков по участкам")
-        chart_title.setStyleSheet("font-size: 18px; font-weight: 700;")
-        chart_layout.addWidget(chart_title)
-
-        bars = QHBoxLayout()
-        bars.setSpacing(12)
-        zones = [("Зона 1", 72), ("Зона 2", 48), ("Зона 3", 84), ("Зона 4", 33), ("Зона 5", 59)]
-        for name, level in zones:
-            col = QVBoxLayout()
-            bar = QProgressBar()
-            bar.setValue(level)
-            bar.setMinimumHeight(180)
-            bar.setOrientation(1)
-            label = QLabel(name)
-            label.setAlignment(0x0004)
-            col.addWidget(bar)
-            col.addWidget(label)
-            bars.addLayout(col)
-        chart_layout.addLayout(bars)
-        main_row.addWidget(chart, 2)
-
-        summary = QFrame()
-        summary.setObjectName("card")
-        summary.setMinimumWidth(330)
-        summary.setMaximumWidth(330)
-        summary_layout = QVBoxLayout(summary)
-        summary_layout.setContentsMargins(16, 16, 16, 16)
-
-        summary_title = QLabel("Краткая сводка")
-        summary_title.setStyleSheet("font-size: 18px; font-weight: 700;")
-        summary_layout.addWidget(summary_title)
-        tasks = [
-            "Усилить наблюдение у входа №2",
-            "Проверить 3 бригады по PPE",
-            "Выполнить инструктаж первой смены",
-            "Подтвердить отметку в зоне 4",
-        ]
-        for task in tasks:
-            task_label = QLabel(f"• {task}")
-            task_label.setStyleSheet("font-size: 12px; color: #cbd6e6; margin-top: 8px;")
-            summary_layout.addWidget(task_label)
-        summary_layout.addStretch()
-        main_row.addWidget(summary, 1)
-        layout.addLayout(main_row)
-
-        footer = QHBoxLayout()
-        footer.addStretch()
-        export_btn = QPushButton("📤 Экспорт в PDF")
-        export_btn.setObjectName("ghostButton")
-        footer.addWidget(export_btn)
-        layout.addLayout(footer)
+        note = QLabel(
+            f"Всего смен с записями: {summary['total_shifts']}. "
+            "В расчет входят только: без каски, без маски и без защитного жилета."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #96a3b7; font-size: 12px;")
+        layout.addWidget(note)
+        layout.addStretch()

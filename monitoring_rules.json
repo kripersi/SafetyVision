@@ -7,6 +7,6 @@
   "Person": true,
   "Safety Cone": false,
   "Safety Vest": true,
-  "machinery": false,
-  "vehicle": false
+  "machinery": true,
+  "vehicle": true
 }
