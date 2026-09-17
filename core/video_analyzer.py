@@ -2,14 +2,17 @@ import cv2
 import json
 import os
 
+from PySide6.QtCore import QMutexLocker
+
 from core.utils import format_time
 
 
 class VideoAnalyzer:
 
-    def __init__(self, detector):
+    def __init__(self, detector, detector_lock=None):
 
         self.detector = detector
+        self.detector_lock = detector_lock
 
         self.violation_classes = {
             "NO-Hardhat": "Отсутствие каски",
@@ -90,7 +93,11 @@ class VideoAnalyzer:
             # Проверяем только каждые X секунд
             if current_time >= next_check_time:
 
-                detections = self.detector.detect(frame)
+                if self.detector_lock is None:
+                    detections = self.detector.detect(frame)
+                else:
+                    with QMutexLocker(self.detector_lock):
+                        detections = self.detector.detect(frame)
 
                 # Оставляем только нарушения
                 detected_violations = []

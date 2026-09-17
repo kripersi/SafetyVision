@@ -274,17 +274,17 @@ class VideoWorker(QThread):
     error = Signal(str)
     progress_changed = Signal(float)
 
-    def __init__(self, video_path, model_path, output_video, output_json):
+    def __init__(self, video_path, detector, detector_lock, output_video, output_json):
         super().__init__()
         self.video_path = video_path
-        self.model_path = model_path
+        self.detector = detector
+        self.detector_lock = detector_lock
         self.output_video = output_video
         self.output_json = output_json
 
     def run(self):
         try:
-            detector = PPEDetector(self.model_path)
-            analyzer = VideoAnalyzer(detector)
+            analyzer = VideoAnalyzer(self.detector, self.detector_lock)
             analyzer.check_interval = 1
             analyzer.confidence_threshold = load_confidence_threshold()
             violations = analyzer.analyze(
@@ -754,10 +754,6 @@ class UploadVideoPage(QWidget):
         self.check_timer = None
         self.capture = None
 
-        self.detector = PPEDetector(
-            "models/ppe_model.pt"
-        )
-
         self.violations_list = None
         self.last_violations = []
 
@@ -1014,7 +1010,8 @@ class UploadVideoPage(QWidget):
 
         self.worker = VideoWorker(
             self.video_path,
-            "models/ppe_model.pt",
+            self.main_window.detector,
+            self.main_window.detector_lock,
             output_video,
             output_json,
         )
