@@ -316,11 +316,74 @@ class VideoPage(QWidget):
         self.selected_camera_index = 0
         self.camera_selector = None
         self.current_worker = None  # ссылка на CameraWorker, к которому сейчас подписаны
+        self.fallback_video_path = self._get_fallback_video_path()
+        self.fallback_capture = None
+        self.fallback_timer = None
 
         self.setStyleSheet(GLOBAL_STYLE)
 
         self.setup_ui()
         self.attach_to_camera(self.selected_camera_index)
+
+    def _get_fallback_video_path(self):
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        videos_dir = os.path.join(project_root, "videos")
+        candidates = ["test.mp4", "test2.mp4", "test3.mp4"]
+        for name in candidates:
+            path = os.path.join(videos_dir, name)
+            if os.path.exists(path):
+                return path
+        return None
+
+    def _stop_fallback_video(self):
+        if self.fallback_timer is not None:
+            self.fallback_timer.stop()
+            self.fallback_timer.deleteLater()
+            self.fallback_timer = None
+        if self.fallback_capture is not None:
+            self.fallback_capture.release()
+            self.fallback_capture = None
+
+    def _show_fallback_video(self):
+        self._stop_fallback_video()
+        self.current_worker = None
+
+        if self.camera_name is not None:
+            self.camera_name.setText("БАЗОВОЕ ВИДЕО")
+
+        if not self.fallback_video_path:
+            self.video_widget.setText("Нет подключённых камер")
+            return
+
+        self.fallback_capture = cv2.VideoCapture(self.fallback_video_path)
+        if not self.fallback_capture.isOpened():
+            self.video_widget.setText("Нет подключённых камер")
+            return
+
+        self.fallback_timer = QTimer(self)
+        self.fallback_timer.timeout.connect(self._read_fallback_frame)
+        self.fallback_timer.start(33)
+        self._read_fallback_frame()
+
+    def _read_fallback_frame(self):
+        if self.fallback_capture is None or not self.fallback_capture.isOpened():
+            return
+
+        ok, frame = self.fallback_capture.read()
+        if not ok or frame is None:
+            self.fallback_capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ok, frame = self.fallback_capture.read()
+            if not ok or frame is None:
+                return
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb.shape
+        bytes_per_line = ch * w
+        image = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(image)
+        self.video_widget.setPixmap(
+            pixmap.scaled(self.video_widget.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        )
 
     def on_camera_selected(self, index):
         if index < 0:
@@ -544,7 +607,17 @@ class VideoPage(QWidget):
     def attach_to_camera(self, index):
         """Отписывается от предыдущего воркера и подписывается на воркер выбранной камеры.
         НЕ открывает новое RTSP-подключение — использует уже работающий поток из MainWindow."""
+        self._stop_fallback_video()
+
+        if not self.camera_sources or not any(
+            self.main_window.camera_statuses.get(camera["name"]) == "connected"
+            for camera in self.camera_sources
+        ):
+            self._show_fallback_video()
+            return
+
         if index < 0 or index >= len(self.camera_sources):
+            self._show_fallback_video()
             return
 
         camera_name = self.camera_sources[index]["name"]
@@ -727,6 +800,7 @@ class VideoPage(QWidget):
     # --------------------------------------------------------
 
     def closeEvent(self, event):
+        self._stop_fallback_video()
         if self.current_worker is not None:
             try:
                 self.current_worker.frame_ready.disconnect(self.on_frame_ready)
