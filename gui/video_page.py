@@ -33,7 +33,10 @@ from config import (
     DISPLAY_CLASS_NAMES,
     get_camera_source,
     get_camera_sources,
+    is_monitoring_rule_enabled,
     load_confidence_threshold,
+    load_detect_interval,
+    load_monitoring_rules,
 )
 from core.detector import PPEDetector
 from core.video_analyzer import VideoAnalyzer
@@ -285,7 +288,7 @@ class VideoWorker(QThread):
     def run(self):
         try:
             analyzer = VideoAnalyzer(self.detector, self.detector_lock)
-            analyzer.check_interval = 1
+            analyzer.check_interval = load_detect_interval()
             analyzer.confidence_threshold = load_confidence_threshold()
             violations = analyzer.analyze(
                 self.video_path,
@@ -328,11 +331,9 @@ class VideoPage(QWidget):
     def _get_fallback_video_path(self):
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         videos_dir = os.path.join(project_root, "videos")
-        candidates = ["test.mp4", "test2.mp4", "test3.mp4"]
-        for name in candidates:
-            path = os.path.join(videos_dir, name)
-            if os.path.exists(path):
-                return path
+        path = os.path.join(videos_dir, CAMERA_SOURCE)
+        if os.path.exists(path):
+            return path
         return None
 
     def _stop_fallback_video(self):
@@ -665,13 +666,18 @@ class VideoPage(QWidget):
         if camera_name != self.camera_sources[self.selected_camera_index]["name"]:
             return
         if not detections:
-            self.add_system_event("YOLO: объектов не обнаружено")
+            self.add_system_event("Нарушений не обнаружено")
             return
-        objects_text = ", ".join(
-            f"{DISPLAY_CLASS_NAMES.get(d['class_name'], d['class_name'])} "
-            f"{d['confidence'] * 100:.0f}%" for d in detections
-        )
-        self.add_system_event(f"YOLO: {objects_text}")
+
+        rules = load_monitoring_rules()
+        for detection in detections:
+            class_name = detection.get("class_name", "unknown")
+            confidence = float(detection.get("confidence", 0.0))
+            if not is_monitoring_rule_enabled(class_name, rules):
+                continue
+            violation_name = DISPLAY_CLASS_NAMES.get(class_name, class_name)
+            time_text = datetime.now().strftime("%H:%M:%S")
+            self.add_system_event(f"{time_text} | {violation_name} | {confidence * 100:.0f}%")
 
     # --------------------------------------------------------
     # SYSTEM EVENTS
@@ -899,6 +905,7 @@ class UploadVideoPage(QWidget):
         analyze_button = QPushButton("Начать анализ")
         analyze_button.setObjectName("primaryButton")
         analyze_button.clicked.connect(self.start_analysis)
+        self.analyze_button = analyze_button
 
         cl.addWidget(upload_button)
         cl.addWidget(analyze_button)
@@ -1073,6 +1080,9 @@ class UploadVideoPage(QWidget):
         self.progress_value.setText("0%")
         self.violations_list.clear()
         self.play_processed_button.setEnabled(False)
+        if hasattr(self, "analyze_button"):
+            self.analyze_button.setEnabled(False)
+            self.analyze_button.setText("Обработка...")
         self.media_player.stop()
         self.video_stack_layout.setCurrentWidget(self.processed_preview)
 
@@ -1152,6 +1162,10 @@ class UploadVideoPage(QWidget):
 
     def analysis_finished(self, violations):
 
+        if hasattr(self, "analyze_button"):
+            self.analyze_button.setEnabled(True)
+            self.analyze_button.setText("Начать анализ")
+
         self.progress.setValue(100)
         self.progress_value.setText("100%")
         self.violations_list.clear()
@@ -1228,6 +1242,10 @@ class UploadVideoPage(QWidget):
         self.media_player.play()
 
     def analysis_error(self, error):
+
+        if hasattr(self, "analyze_button"):
+            self.analyze_button.setEnabled(True)
+            self.analyze_button.setText("Начать анализ")
 
         self.progress.setValue(0)
         self.progress_value.setText("ошибка")

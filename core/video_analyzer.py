@@ -4,10 +4,73 @@ import os
 
 from PySide6.QtCore import QMutexLocker
 
+from config import send_telegram_message
 from core.utils import format_time
 
 
 class VideoAnalyzer:
+
+    @staticmethod
+    def _merge_consecutive_violations(raw_violations):
+        if not raw_violations:
+            return []
+
+        merged = []
+        current = None
+
+        for event in raw_violations:
+            event_types = list(event.get("types", []))
+            event_types = sorted(set(event_types))
+
+            if current is None:
+                current = {
+                    "time_start": float(event["time"]),
+                    "time_end": float(event["time"]),
+                    "types": event_types,
+                    "average_confidences": [float(event.get("average_confidence", 0.0))],
+                    "violation_count": int(event.get("violation_count", 0)),
+                }
+                continue
+
+            if event_types == current["types"]:
+                current["time_end"] = float(event["time"])
+                current["average_confidences"].append(float(event.get("average_confidence", 0.0)))
+                current["violation_count"] += int(event.get("violation_count", 0))
+                continue
+
+            merged.append(current)
+            current = {
+                "time_start": float(event["time"]),
+                "time_end": float(event["time"]),
+                "types": event_types,
+                "average_confidences": [float(event.get("average_confidence", 0.0))],
+                "violation_count": int(event.get("violation_count", 0)),
+            }
+
+        if current is not None:
+            merged.append(current)
+
+        result = []
+        for item in merged:
+            start_time = item["time_start"]
+            end_time = item["time_end"]
+            start_formatted = format_time(start_time)
+            end_formatted = format_time(end_time)
+            if start_time == end_time:
+                time_formatted = start_formatted
+            else:
+                time_formatted = f"{start_formatted}-{end_formatted}"
+
+            average_conf = sum(item["average_confidences"]) / len(item["average_confidences"])
+            result.append({
+                "time": round(start_time, 2),
+                "time_formatted": time_formatted,
+                "types": item["types"],
+                "average_confidence": round(average_conf, 4),
+                "violation_count": item["violation_count"],
+            })
+
+        return result
 
     def __init__(self, detector, detector_lock=None):
 
@@ -164,19 +227,6 @@ class VideoAnalyzer:
                         current_time
                     )
 
-                    types_text = ", ".join(
-                        violation_types
-                    )
-
-                    print(
-                        f"НАРУШЕНИЕ: {time_formatted} | "
-                        f"{types_text} | "
-                        f"средний процент "
-                        f"{average_confidence * 100:.1f}% | "
-                        f"нарушений: {violation_count} \n"
-                    )
-
-
                     # Сохраняем событие
                     violations.append({
                         "time": round(current_time, 2),
@@ -235,6 +285,23 @@ class VideoAnalyzer:
         cap.release()
         out.release()
 
+        merged_violations = self._merge_consecutive_violations(violations)
+
+        for violation in merged_violations:
+            types_text = ", ".join(violation["types"])
+            message = (
+                f"{violation['time_formatted']} | {types_text} | "
+                f"{violation['average_confidence'] * 100:.1f}%"
+            )
+            send_telegram_message(message)
+            print(
+                f"НАРУШЕНИЕ: {violation['time_formatted']} | "
+                f"{types_text} | "
+                f"средний процент "
+                f"{violation['average_confidence'] * 100:.1f}% | "
+                f"нарушений: {violation['violation_count']} \n"
+            )
+
         # Создаём папку для JSON
         os.makedirs(
             os.path.dirname(json_path) or ".",
@@ -249,7 +316,7 @@ class VideoAnalyzer:
         ) as f:
 
             json.dump(
-                violations,
+                merged_violations,
                 f,
                 ensure_ascii=False,
                 indent=4
@@ -257,7 +324,7 @@ class VideoAnalyzer:
 
         print("\n\nАнализ завершён.")
         print(
-            f"Найдено событий: {len(violations)}"
+            f"Найдено событий: {len(merged_violations)}"
         )
 
-        return violations
+        return merged_violations

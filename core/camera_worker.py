@@ -11,6 +11,8 @@ from PySide6.QtCore import (
     QMutexLocker
 )
 
+from config import DISPLAY_CLASS_NAMES, is_monitoring_rule_enabled, send_telegram_message
+
 
 class CameraWorker(QThread):
     """
@@ -42,8 +44,6 @@ class CameraWorker(QThread):
         detector,
         detector_lock,
         detect_interval=5.0,
-        save_live_frames=True,
-        save_dir=r"C:\Users\user\PycharmProjects\BIM_model\results\live_frames",
         parent=None
     ):
         super().__init__(parent)
@@ -80,161 +80,6 @@ class CameraWorker(QThread):
         # ----------------------------------------------------------
 
         self._running = True
-
-        # ----------------------------------------------------------
-        # Управление сохранением
-        # ----------------------------------------------------------
-
-        self._save_live_frames = bool(save_live_frames)
-
-        self.save_dir = save_dir
-
-        if self._save_live_frames:
-            self._ensure_save_dir()
-
-    # ==============================================================
-    # SAVE SETTINGS
-    # ==============================================================
-
-    def set_save_frames(self, enabled: bool):
-        """
-        Включить или выключить сохранение обработанных AI кадров.
-
-        Можно вызывать в любой момент:
-
-            worker.set_save_frames(True)
-
-        или:
-
-            worker.set_save_frames(False)
-        """
-
-        self._save_live_frames = bool(enabled)
-
-        if self._save_live_frames:
-            self._ensure_save_dir()
-
-        print(
-            f"[{self.camera_name}] "
-            f"Сохранение кадров: "
-            f"{'ВКЛ' if self._save_live_frames else 'ВЫКЛ'}"
-        )
-
-    def is_save_frames_enabled(self) -> bool:
-        """
-        Возвращает текущее состояние сохранения.
-        """
-
-        return self._save_live_frames
-
-    # ==============================================================
-    # SAVE DIRECTORY
-    # ==============================================================
-
-    def _ensure_save_dir(self):
-        """
-        Создаёт папку для сохранения.
-        """
-
-        try:
-
-            os.makedirs(
-                self.save_dir,
-                exist_ok=True
-            )
-
-        except Exception as e:
-
-            print(
-                f"[{self.camera_name}] "
-                f"Ошибка создания папки:\n"
-                f"{self.save_dir}\n"
-                f"{e}"
-            )
-
-    # ==============================================================
-    # SAVE PROCESSED FRAME
-    # ==============================================================
-
-    def _save_processed_frame(
-        self,
-        frame
-    ):
-        """
-        Сохраняет уже обработанный AI кадр.
-
-        В этот метод должен приходить frame, на котором
-        уже нарисованы bounding boxes / labels.
-        """
-
-        if not self._save_live_frames:
-            return
-
-        if frame is None:
-            return
-
-        try:
-
-            self._ensure_save_dir()
-
-            # ------------------------------------------------------
-            # Делаем безопасное имя камеры
-            # ------------------------------------------------------
-
-            safe_camera_name = "".join(
-                c
-                if c.isalnum() or c in ("-", "_")
-                else "_"
-                for c in self.camera_name
-            )
-
-            # ------------------------------------------------------
-            # Время с миллисекундами
-            # ------------------------------------------------------
-
-            timestamp = datetime.now().strftime(
-                "%Y-%m-%d_%H-%M-%S-%f"
-            )[:-3]
-
-            # ------------------------------------------------------
-            # Имя файла
-            # ------------------------------------------------------
-
-            filename = (
-                f"{safe_camera_name}_"
-                f"{timestamp}.jpg"
-            )
-
-            filepath = os.path.join(
-                self.save_dir,
-                filename
-            )
-
-            # ------------------------------------------------------
-            # Сохраняем JPEG
-            # ------------------------------------------------------
-
-            success = cv2.imwrite(
-                filepath,
-                frame
-            )
-
-            if not success:
-
-                print(
-                    f"[{self.camera_name}] "
-                    f"Не удалось сохранить:\n"
-                    f"{filepath}"
-                )
-
-        except Exception as e:
-
-            # Ошибка сохранения НЕ должна останавливать камеру
-
-            print(
-                f"[{self.camera_name}] "
-                f"Ошибка сохранения кадра: {e}"
-            )
 
     # ==============================================================
     # DETECTION INTERVAL
@@ -378,14 +223,6 @@ class CameraWorker(QThread):
                             )
                         )
 
-                        # ==========================================
-                        # СОХРАНЯЕМ ИМЕННО ОБРАБОТАННЫЙ КАДР
-                        # ==========================================
-
-                        self._save_processed_frame(
-                            processed_frame
-                        )
-
                     except Exception as e:
 
                         print(
@@ -398,11 +235,29 @@ class CameraWorker(QThread):
                     # --------------------------------------------------
 
                     if detections:
+                        filtered_detections = []
+                        for detection in detections:
+                            class_name = detection.get("class_name")
+                            if not isinstance(class_name, str):
+                                continue
+                            if not is_monitoring_rule_enabled(class_name):
+                                continue
+                            if class_name not in {"NO-Hardhat", "NO-Mask", "NO-Safety Vest"}:
+                                continue
+                            confidence = float(detection.get("confidence", 0.0))
+                            violation_name = DISPLAY_CLASS_NAMES.get(class_name, class_name)
+                            message = (
+                                f"{datetime.now().strftime('%H:%M:%S')} | "
+                                f"{violation_name} | {confidence * 100:.0f}%"
+                            )
+                            send_telegram_message(message)
+                            filtered_detections.append(detection)
 
-                        self.violation_found.emit(
-                            self.camera_name,
-                            detections
-                        )
+                        if filtered_detections:
+                            self.violation_found.emit(
+                                self.camera_name,
+                                filtered_detections
+                            )
 
                 # --------------------------------------------------
                 # Небольшая задержка

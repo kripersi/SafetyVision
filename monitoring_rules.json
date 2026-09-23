@@ -1,6 +1,6 @@
 {
   "Hardhat": true,
-  "Mask": true,
+  "Mask": false,
   "NO-Hardhat": true,
   "NO-Mask": true,
   "NO-Safety Vest": true,

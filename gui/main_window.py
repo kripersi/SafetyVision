@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from config import (
     get_camera_sources,
+    is_monitoring_rule_enabled,
     load_cameras,
     load_confidence_threshold,
     load_detect_interval,
@@ -292,10 +293,9 @@ class MainWindow(QMainWindow):
             confidence = float(detection.get("confidence", 0.0))
             if confidence < confidence_threshold:
                 continue
-            normalized = self.normalize_violation_name(class_name)
-            key = class_name if isinstance(normalized, str) else class_name
-            if not rules.get(key, True):
+            if not is_monitoring_rule_enabled(class_name, rules):
                 continue
+            normalized = self.normalize_violation_name(class_name)
             confidence_pct = int(confidence * 100)
             events.append((normalized, confidence_pct))
 
