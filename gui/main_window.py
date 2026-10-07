@@ -607,10 +607,10 @@ class MainWindow(QMainWindow):
         interval_layout.addWidget(QLabel("Проверять нарушения каждые"))
 
         interval_spin = QDoubleSpinBox()
-        interval_spin.setRange(0.1, 3600.0)
+        interval_spin.setRange(0.0, 3600.0)
         interval_spin.setSingleStep(0.5)
         interval_spin.setDecimals(1)
-        interval_spin.setSuffix(" сек.")
+        interval_spin.setSuffix(" сек. (0 — постоянно)")
         interval_spin.setValue(load_detect_interval())
         interval_layout.addWidget(interval_spin)
 

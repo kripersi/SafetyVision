@@ -1,305 +1,246 @@
 import os
+import threading
 import time
 from datetime import datetime
 
-import cv2
-
-from PySide6.QtCore import (
-    QThread,
-    Signal,
-    QMutex,
-    QMutexLocker
+# Низкая задержка RTSP. Нужно задать ДО создания VideoCapture.
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+    "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay",
 )
+
+import cv2
+from PySide6.QtCore import QThread, Signal, QMutexLocker
 
 from config import (
     DISPLAY_CLASS_NAMES,
     LOCAL_CAMERA_INDEX,
     get_opencv_camera_source,
     is_monitoring_rule_enabled,
+    load_confidence_threshold,
     send_telegram_message,
+    should_run_detection,
 )
+from core.violation_tracker import ViolationTracker
+
+VIOLATION_CLASSES = {"NO-Hardhat", "NO-Mask", "NO-Safety Vest"}
+
+MAX_UI_FPS = 30
+TELEGRAM_COOLDOWN = 30.0     # сек. между сообщениями об одном нарушении на одной камере
+RECONNECT_AFTER_FAILS = 25   # ~5 сек без кадров -> переподключение
 
 
 class CameraWorker(QThread):
     """
-    Один воркер = одно RTSP-подключение к одной камере.
+    Два потока на камеру:
 
-    Возможности:
+    1. run()          — читает RTSP и отдаёт в GUI КАЖДЫЙ кадр
+                        (с нарисованными последними детекциями).
+    2. _infer_loop()  — отдельный поток, гоняет AI по последнему кадру
+                        и обновляет список детекций.
 
-    1. Постоянно получает кадры с RTSP.
-    2. Передаёт кадры для отображения.
-    3. Раз в detect_interval секунд запускает AI.
-    4. Получает detections от AI.
-    5. Рисует bounding boxes и подписи.
-    6. Сохраняет обработанный кадр.
-    7. Сохранение можно включать/выключать во время работы.
+    Чтение никогда не ждёт AI, поэтому видео не лагает.
     """
 
-    # camera_name, frame
     frame_ready = Signal(str, object)
-
-    # camera_name, detections
     violation_found = Signal(str, list)
-
-    # camera_name, status
     status_changed = Signal(str, str)
 
-    def __init__(
-        self,
-        camera,
-        detector,
-        detector_lock,
-        detect_interval=5.0,
-        parent=None
-    ):
+    def __init__(self, camera, detector, detector_lock, detect_interval=5.0, parent=None):
         super().__init__(parent)
-
-        # ----------------------------------------------------------
-        # Камера
-        # ----------------------------------------------------------
 
         self.camera_name = camera["name"]
         self.url = camera["url"]
-
-        # ----------------------------------------------------------
-        # Общий AI detector
-        # ----------------------------------------------------------
-
         self.detector = detector
-
-        # ----------------------------------------------------------
-        # Общий mutex.
-        #
-        # Нужен, если несколько камер используют одну модель.
-        # ----------------------------------------------------------
-
         self.detector_lock = detector_lock
-
-        # ----------------------------------------------------------
-        # Интервал AI-проверки
-        # ----------------------------------------------------------
-
         self.detect_interval = detect_interval
-
-        # ----------------------------------------------------------
-        # Управление потоком
-        # ----------------------------------------------------------
 
         self._running = True
 
-    # ==============================================================
-    # DETECTION INTERVAL
-    # ==============================================================
+        # Общее состояние между потоками
+        self._state_lock = threading.Lock()
+        self._latest_frame = None      # оригинальный кадр (его никто не рисует поверх)
+        self._latest_frame_id = 0
+        self._detections = []          # последние детекции
+        self._detections_time = 0.0
+
+        self._tracker = ViolationTracker()
+
+    # ==========================================================
 
     def set_detect_interval(self, interval):
-        """Изменить период AI-проверки без перезапуска камеры."""
-        self.detect_interval = max(0.1, float(interval))
-
-    # ==============================================================
-    # STOP
-    # ==============================================================
+        self.detect_interval = max(0.0, float(interval))
 
     def stop(self):
-        """
-        Остановить поток камеры.
-        """
-
         self._running = False
+        self.wait(5000)
 
-        self.wait(3000)
+    # ==========================================================
 
-    # ==============================================================
-    # MAIN THREAD
-    # ==============================================================
+    def _hold_time(self):
+        """Сколько секунд держать старые рамки, если AI не обновил результат."""
+        return max(1.5, self.detect_interval * 1.5 + 1.0)
+
+    def _open_capture(self):
+        source = get_opencv_camera_source(self.url)
+        backend = cv2.CAP_FFMPEG if source != LOCAL_CAMERA_INDEX else cv2.CAP_ANY
+        cap = cv2.VideoCapture(source, backend)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        return cap
+
+    # ==========================================================
+    # ПОТОК ЧТЕНИЯ + ОТОБРАЖЕНИЯ
+    # ==========================================================
 
     def run(self):
-
         cap = None
+        infer_thread = None
 
         try:
-
-            # ------------------------------------------------------
-            # Открываем RTSP или локальную камеру ноутбука
-            # ------------------------------------------------------
-
-            opencv_source = get_opencv_camera_source(self.url)
-            capture_backend = (
-                cv2.CAP_FFMPEG
-                if opencv_source != LOCAL_CAMERA_INDEX
-                else cv2.CAP_ANY
-            )
-            cap = cv2.VideoCapture(opencv_source, capture_backend)
-
-            cap.set(
-                cv2.CAP_PROP_BUFFERSIZE,
-                1
-            )
-
-            # ------------------------------------------------------
-            # Проверяем подключение
-            # ------------------------------------------------------
-
+            cap = self._open_capture()
             if not cap.isOpened():
-
-                self.status_changed.emit(
-                    self.camera_name,
-                    "error"
-                )
-
+                self.status_changed.emit(self.camera_name, "error")
                 return
 
-            # ------------------------------------------------------
-            # Камера подключена
-            # ------------------------------------------------------
+            self.status_changed.emit(self.camera_name, "connected")
 
-            self.status_changed.emit(
-                self.camera_name,
-                "connected"
+            infer_thread = threading.Thread(
+                target=self._infer_loop,
+                name=f"infer-{self.camera_name}",
+                daemon=True,
             )
+            infer_thread.start()
 
-            # ------------------------------------------------------
-            # Время последнего AI запуска
-            # ------------------------------------------------------
-
-            last_detect_time = 0.0
-
-            # ======================================================
-            # MAIN LOOP
-            # ======================================================
+            fails = 0
+            last_emit = 0.0
+            min_emit_dt = 1.0 / MAX_UI_FPS
 
             while self._running:
-
-                # --------------------------------------------------
-                # Читаем кадр
-                # --------------------------------------------------
-
                 ok, frame = cap.read()
 
                 if not ok or frame is None:
-
-                    self.msleep(200)
-
+                    fails += 1
+                    if fails >= RECONNECT_AFTER_FAILS:
+                        self.status_changed.emit(self.camera_name, "error")
+                        cap.release()
+                        self.msleep(1000)
+                        cap = self._open_capture()
+                        if cap.isOpened():
+                            self.status_changed.emit(self.camera_name, "connected")
+                            fails = 0
+                    else:
+                        self.msleep(200)
                     continue
 
-                # --------------------------------------------------
-                # Отдаём исходный кадр интерфейсу сразу.
-                # --------------------------------------------------
+                fails = 0
 
-                self.frame_ready.emit(
-                    self.camera_name,
-                    frame
-                )
+                # Отдаём последний кадр AI-потоку (ссылка, без копии;
+                # сами мы этот массив больше не меняем).
+                with self._state_lock:
+                    self._latest_frame = frame
+                    self._latest_frame_id += 1
+                    detections = list(self._detections)
+                    det_age = time.time() - self._detections_time
 
-                # --------------------------------------------------
-                # Проверяем интервал AI
-                # --------------------------------------------------
-
+                # Не заваливаем GUI лишними кадрами
                 now = time.time()
+                if now - last_emit < min_emit_dt:
+                    continue
+                last_emit = now
 
-                if (
-                    now - last_detect_time
-                    >= self.detect_interval
-                ):
+                # Рисуем последние рамки на КАЖДОМ кадре, пока они не устарели
+                if detections and det_age <= self._hold_time():
+                    out = self.detector.draw_detections(frame, detections, copy=True)
+                else:
+                    out = frame
 
-                    last_detect_time = now
-
-                    detections = []
-
-                    processed_frame = frame
-                    try:
-
-                        # ==========================================
-                        # AI
-                        # ==========================================
-
-                        with QMutexLocker(
-                            self.detector_lock
-                        ):
-
-                            detections = self.detector.detect(
-                                frame
-                            )
-
-                        # ==========================================
-                        # РИСУЕМ AI РЕЗУЛЬТАТ
-                        # ==========================================
-
-                        processed_frame = (
-                            self.detector.draw_detections(
-                                frame,
-                                detections
-                            )
-                        )
-
-                    except Exception as e:
-
-                        print(
-                            f"[{self.camera_name}] "
-                            f"Ошибка AI: {e}"
-                        )
-
-                    # --------------------------------------------------
-                    # Передаём кадр для отображения и нарушения
-                    # --------------------------------------------------
-
-                    self.frame_ready.emit(
-                        self.camera_name,
-                        processed_frame
-                    )
-
-                    if detections:
-                        filtered_detections = []
-                        for detection in detections:
-                            class_name = detection.get("class_name")
-                            if not isinstance(class_name, str):
-                                continue
-                            if not is_monitoring_rule_enabled(class_name):
-                                continue
-                            if class_name not in {"NO-Hardhat", "NO-Mask", "NO-Safety Vest"}:
-                                continue
-                            confidence = float(detection.get("confidence", 0.0))
-                            violation_name = DISPLAY_CLASS_NAMES.get(class_name, class_name)
-                            message = (
-                                f"{datetime.now().strftime('%H:%M:%S')} | "
-                                f"{violation_name} | {confidence * 100:.0f}%"
-                            )
-                            send_telegram_message(message)
-                            filtered_detections.append(detection)
-
-                        if filtered_detections:
-                            self.violation_found.emit(
-                                self.camera_name,
-                                filtered_detections
-                            )
-
-                # --------------------------------------------------
-                # Небольшая задержка
-                # --------------------------------------------------
-
-                self.msleep(30)
+                self.frame_ready.emit(self.camera_name, out)
 
         except Exception as e:
-
-            print(
-                f"[{self.camera_name}] "
-                f"Ошибка CameraWorker: {e}"
-            )
-
-            self.status_changed.emit(
-                self.camera_name,
-                "error"
-            )
+            print(f"[{self.camera_name}] Ошибка CameraWorker: {e}")
+            self.status_changed.emit(self.camera_name, "error")
 
         finally:
-
-            # ------------------------------------------------------
-            # Освобождаем RTSP
-            # ------------------------------------------------------
-
+            self._running = False
+            if infer_thread is not None:
+                infer_thread.join(timeout=3)
             if cap is not None:
                 cap.release()
+            self.status_changed.emit(self.camera_name, "stopped")
 
-            self.status_changed.emit(
-                self.camera_name,
-                "stopped"
+    # ==========================================================
+    # ПОТОК AI
+    # ==========================================================
+
+    def _infer_loop(self):
+        last_detect_time = 0.0
+        last_frame_id = -1
+
+        while self._running:
+            with self._state_lock:
+                frame = self._latest_frame
+                frame_id = self._latest_frame_id
+
+            now = time.time()
+
+            if (
+                frame is None
+                or frame_id == last_frame_id
+                or not should_run_detection(now, last_detect_time, self.detect_interval)
+            ):
+                time.sleep(0.01)
+                continue
+
+            last_detect_time = now
+            last_frame_id = frame_id
+
+            try:
+                with QMutexLocker(self.detector_lock):
+                    detections = self.detector.detect(frame)
+            except Exception as e:
+                print(f"[{self.camera_name}] Ошибка AI: {e}")
+                time.sleep(0.5)
+                continue
+
+            with self._state_lock:
+                self._detections = detections
+                self._detections_time = time.time()
+
+            self._handle_violations(detections)
+
+    # ==========================================================
+
+    def _handle_violations(self, detections):
+        threshold = load_confidence_threshold()
+
+        violations = [
+            det for det in detections
+            if isinstance(det.get("class_name"), str)
+               and det["class_name"] in VIOLATION_CLASSES
+               and det.get("confidence", 0.0) >= threshold
+               and is_monitoring_rule_enabled(det["class_name"])
+        ]
+
+        # ВАЖНО: вызываем и с пустым списком, иначе трекер не поймёт,
+        # что нарушение закончилось.
+        clear_after = max(5.0, self.detect_interval * 2 + 2.0)
+        events = self._tracker.update(violations, time.time(), clear_after)
+
+        if not events:
+            return
+
+        for ev in events:
+            name = DISPLAY_CLASS_NAMES.get(ev["class_name"], ev["class_name"])
+            people = f" ×{ev['count']}" if ev["count"] > 1 else ""
+            suffix = " (продолжается)" if ev["repeat"] else ""
+            message = (
+                f"{datetime.now().strftime('%H:%M:%S')} | {self.camera_name} | "
+                f"{name}{people} | {ev['confidence'] * 100:.0f}%{suffix}"
             )
+            threading.Thread(
+                target=send_telegram_message,
+                args=(message,),
+                daemon=True,
+            ).start()
+
+        self.violation_found.emit(self.camera_name, events)
