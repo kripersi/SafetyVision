@@ -11,7 +11,13 @@ from PySide6.QtCore import (
     QMutexLocker
 )
 
-from config import DISPLAY_CLASS_NAMES, is_monitoring_rule_enabled, send_telegram_message
+from config import (
+    DISPLAY_CLASS_NAMES,
+    LOCAL_CAMERA_INDEX,
+    get_opencv_camera_source,
+    is_monitoring_rule_enabled,
+    send_telegram_message,
+)
 
 
 class CameraWorker(QThread):
@@ -113,13 +119,16 @@ class CameraWorker(QThread):
         try:
 
             # ------------------------------------------------------
-            # Открываем RTSP
+            # Открываем RTSP или локальную камеру ноутбука
             # ------------------------------------------------------
 
-            cap = cv2.VideoCapture(
-                self.url,
+            opencv_source = get_opencv_camera_source(self.url)
+            capture_backend = (
                 cv2.CAP_FFMPEG
+                if opencv_source != LOCAL_CAMERA_INDEX
+                else cv2.CAP_ANY
             )
+            cap = cv2.VideoCapture(opencv_source, capture_backend)
 
             cap.set(
                 cv2.CAP_PROP_BUFFERSIZE,
@@ -173,9 +182,7 @@ class CameraWorker(QThread):
                     continue
 
                 # --------------------------------------------------
-                # Отдаём оригинальный кадр интерфейсу.
-                #
-                # Здесь он БЕЗ AI-разметки.
+                # Отдаём исходный кадр интерфейсу сразу.
                 # --------------------------------------------------
 
                 self.frame_ready.emit(
@@ -198,6 +205,7 @@ class CameraWorker(QThread):
 
                     detections = []
 
+                    processed_frame = frame
                     try:
 
                         # ==========================================
@@ -231,8 +239,13 @@ class CameraWorker(QThread):
                         )
 
                     # --------------------------------------------------
-                    # Передаём найденные нарушения
+                    # Передаём кадр для отображения и нарушения
                     # --------------------------------------------------
+
+                    self.frame_ready.emit(
+                        self.camera_name,
+                        processed_frame
+                    )
 
                     if detections:
                         filtered_detections = []
