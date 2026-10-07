@@ -4,7 +4,6 @@ import os
 
 from PySide6.QtCore import QMutexLocker
 
-from config import send_telegram_message
 from core.utils import format_time
 
 
@@ -289,11 +288,6 @@ class VideoAnalyzer:
 
         for violation in merged_violations:
             types_text = ", ".join(violation["types"])
-            message = (
-                f"{violation['time_formatted']} | {types_text} | "
-                f"{violation['average_confidence'] * 100:.1f}%"
-            )
-            send_telegram_message(message)
             print(
                 f"НАРУШЕНИЕ: {violation['time_formatted']} | "
                 f"{types_text} | "
