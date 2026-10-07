@@ -4,6 +4,11 @@ import os
 
 from PySide6.QtCore import QMutexLocker
 
+from config import (
+    filter_detections_for_display,
+    load_display_confidence_threshold,
+    load_monitoring_rules,
+)
 from core.utils import format_time
 
 
@@ -164,7 +169,17 @@ class VideoAnalyzer:
                 # Оставляем только нарушения
                 detected_violations = []
 
-                for detection in detections:
+                display_detections = filter_detections_for_display(
+                    detections,
+                    rules=load_monitoring_rules(),
+                    confidence_threshold=load_display_confidence_threshold(),
+                )
+                annotated_frame = self.detector.draw_detections(
+                    frame,
+                    display_detections,
+                )
+
+                for detection in display_detections:
 
                     class_name = detection["class_name"]
 
@@ -237,33 +252,6 @@ class VideoAnalyzer:
                         ),
                         "violation_count": violation_count
                     })
-
-                    # Рисуем найденные нарушения
-                    for violation in detected_violations:
-                        x1, y1, x2, y2 = violation["bbox"]
-
-                        label = (
-                            f"{violation['type']} "
-                            f"{violation['confidence'] * 100:.0f}%"
-                        )
-
-                        cv2.rectangle(
-                            annotated_frame,
-                            (x1, y1),
-                            (x2, y2),
-                            (0, 0, 255),
-                            2
-                        )
-
-                        cv2.putText(
-                            annotated_frame,
-                            label,
-                            (x1, max(y1 - 10, 20)),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.6,
-                            (0, 0, 255),
-                            2
-                        )
 
                 # Следующая проверка
                 next_check_time += self.check_interval

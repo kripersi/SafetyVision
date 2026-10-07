@@ -24,12 +24,14 @@ from config import (
     load_cameras,
     load_confidence_threshold,
     load_detect_interval,
+    load_display_confidence_threshold,
     load_monitoring_rules,
     DISPLAY_CLASS_NAMES,
     VIOLATION_CLASS_NAMES,
     save_cameras,
     save_confidence_threshold,
     save_detect_interval,
+    save_display_confidence_threshold,
     save_monitoring_rules,
 )
 from core.detector import PPEDetector
@@ -644,6 +646,28 @@ class MainWindow(QMainWindow):
         confidence_layout.addStretch()
         layout.addWidget(confidence_group)
 
+        display_confidence_group = QWidget()
+        display_confidence_layout = QHBoxLayout(display_confidence_group)
+        display_confidence_layout.setContentsMargins(0, 0, 0, 0)
+        display_confidence_layout.setSpacing(10)
+        display_confidence_layout.addWidget(QLabel("Изображать при уверенности от"))
+
+        display_confidence_spin = QDoubleSpinBox()
+        display_confidence_spin.setRange(0.0, 100.0)
+        display_confidence_spin.setSingleStep(5.0)
+        display_confidence_spin.setDecimals(0)
+        display_confidence_spin.setSuffix(" %")
+        display_confidence_spin.setValue(load_display_confidence_threshold() * 100)
+        display_confidence_layout.addWidget(display_confidence_spin)
+
+        save_display_confidence_button = QPushButton("Сохранить")
+        save_display_confidence_button.clicked.connect(
+            lambda: self._save_display_confidence_threshold(display_confidence_spin.value())
+        )
+        display_confidence_layout.addWidget(save_display_confidence_button)
+        display_confidence_layout.addStretch()
+        layout.addWidget(display_confidence_group)
+
         toggle_group = QWidget()
         toggle_layout = QVBoxLayout(toggle_group)
         toggle_layout.setSpacing(10)
@@ -723,6 +747,9 @@ class MainWindow(QMainWindow):
 
     def _save_confidence_threshold(self, percentage: float):
         save_confidence_threshold(percentage / 100.0)
+
+    def _save_display_confidence_threshold(self, percentage: float):
+        save_display_confidence_threshold(percentage / 100.0)
 
     def _add_camera_from_config(self, name: str, url: str):
         text_name = (name or "").strip()

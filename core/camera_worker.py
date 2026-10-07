@@ -18,8 +18,11 @@ from config import (
     get_opencv_camera_source,
     is_monitoring_rule_enabled,
     load_confidence_threshold,
+    load_display_confidence_threshold,
     send_telegram_message,
     should_run_detection,
+    filter_detections_for_display,
+    load_monitoring_rules,
 )
 from core.violation_tracker import ViolationTracker
 
@@ -148,9 +151,15 @@ class CameraWorker(QThread):
                     continue
                 last_emit = now
 
-                # Рисуем последние рамки на КАЖДОМ кадре, пока они не устарели
+                # Рисуем только разрешённые классами и уверенные детекции.
+                # Старые детекции остаются на кадре до истечения времени их хранения.
                 if detections and det_age <= self._hold_time():
-                    out = self.detector.draw_detections(frame, detections, copy=True)
+                    display_detections = filter_detections_for_display(
+                        detections,
+                        rules=load_monitoring_rules(),
+                        confidence_threshold=load_display_confidence_threshold(),
+                    )
+                    out = self.detector.draw_detections(frame, display_detections, copy=True)
                 else:
                     out = frame
 
