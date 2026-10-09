@@ -40,8 +40,8 @@ class ViolationTracker:
 
             if track["reported_at"] is None:
                 confirmed = (
-                    track["hits"] >= self.confirm_hits
-                    and now - track["first"] >= self.confirm_seconds
+                        track["hits"] >= self.confirm_hits
+                        and now - track["first"] >= self.confirm_seconds
                 )
                 if confirmed:
                     track["reported_at"] = now

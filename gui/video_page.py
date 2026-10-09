@@ -31,9 +31,11 @@ from PySide6.QtWidgets import (
 from config import (
     CAMERA_SOURCE,
     DISPLAY_CLASS_NAMES,
+)
+from core.monitoring import is_monitoring_rule_enabled
+from core.settings_store import (
     get_camera_source,
     get_camera_sources,
-    is_monitoring_rule_enabled,
     load_confidence_threshold,
     load_detect_interval,
     load_monitoring_rules,
@@ -395,8 +397,6 @@ class VideoPage(QWidget):
     # UI
     # --------------------------------------------------------
 
-
-
     def check_live_violations(self):
 
         if self.current_frame is None:
@@ -600,7 +600,6 @@ class VideoPage(QWidget):
 
         root.addLayout(content, 1)
 
-
     # --------------------------------------------------------
     # LIVE FEED
     # --------------------------------------------------------
@@ -611,8 +610,8 @@ class VideoPage(QWidget):
         self._stop_fallback_video()
 
         if not self.camera_sources or not any(
-            self.main_window.camera_statuses.get(camera["name"]) == "connected"
-            for camera in self.camera_sources
+                self.main_window.camera_statuses.get(camera["name"]) == "connected"
+                for camera in self.camera_sources
         ):
             self._show_fallback_video()
             return
@@ -723,7 +722,6 @@ class VideoPage(QWidget):
         self.violations_list.insertItem(self.violations_list.count(), item)
         self.violations_list.setItemWidget(item, widget)
         self.update_events_count()
-
 
     def refresh_violation_list(self):
 

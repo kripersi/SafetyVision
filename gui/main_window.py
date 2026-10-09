@@ -19,15 +19,17 @@ from PySide6.QtWidgets import (
 )
 
 from config import (
+    DISPLAY_CLASS_NAMES,
+    VIOLATION_CLASS_NAMES,
+)
+from core.monitoring import is_monitoring_rule_enabled
+from core.settings_store import (
     get_camera_sources,
-    is_monitoring_rule_enabled,
     load_cameras,
     load_confidence_threshold,
     load_detect_interval,
     load_display_confidence_threshold,
     load_monitoring_rules,
-    DISPLAY_CLASS_NAMES,
-    VIOLATION_CLASS_NAMES,
     save_cameras,
     save_confidence_threshold,
     save_detect_interval,

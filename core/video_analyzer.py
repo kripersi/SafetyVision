@@ -4,11 +4,10 @@ import os
 
 from PySide6.QtCore import QMutexLocker
 
-from config import (
+from core.monitoring import (
     filter_detections_for_display,
-    load_display_confidence_threshold,
-    load_monitoring_rules,
 )
+from core.settings_store import load_display_confidence_threshold, load_monitoring_rules
 from core.utils import format_time
 
 
