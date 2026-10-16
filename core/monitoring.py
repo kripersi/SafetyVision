@@ -5,8 +5,28 @@ from config import (
 from core.settings_store import load_monitoring_rules
 
 
+# Строится один раз при загрузке модуля, а не при каждом вызове
+_RULE_KEYS_LOWER = {key.lower(): key for key in DEFAULT_MONITORING_RULES}
+
+_ALIASES = {
+    "без жилета": "NO-Safety Vest",
+    "без каски": "NO-Hardhat",
+    "без маски": "NO-Mask",
+    "жилет": "Safety Vest",
+    "защитный жилет": "Safety Vest",
+    "каска": "Hardhat",
+    "конус безопасности": "Safety Cone",
+    "маска": "Mask",
+    "машины": "machinery",
+    "машины и механизмы": "machinery",
+    "механизмы": "machinery",
+    "транспорт": "vehicle",
+    "человек": "Person",
+}
+
+
 def normalize_monitoring_rule_key(class_name):
-    """Normalize a YOLO or Russian class label to its monitoring-rule key."""
+    """Приводит название класса (YOLO или русское) к ключу правила мониторинга."""
     if not isinstance(class_name, str):
         return ""
 
@@ -14,31 +34,8 @@ def normalize_monitoring_rule_key(class_name):
     if not raw:
         return ""
 
-    if raw in DEFAULT_MONITORING_RULES:
-        return raw
-
-    lowered = raw.lower()
-    if lowered in {key.lower() for key in DEFAULT_MONITORING_RULES}:
-        for key in DEFAULT_MONITORING_RULES:
-            if key.lower() == lowered:
-                return key
-
-    alias_map = {
-        "Без жилета": "NO-Safety Vest",
-        "Без каски": "NO-Hardhat",
-        "Без маски": "NO-Mask",
-        "Жилет": "Safety Vest",
-        "Защитный жилет": "Safety Vest",
-        "Каска": "Hardhat",
-        "Конус безопасности": "Safety Cone",
-        "Маска": "Mask",
-        "Машины": "machinery",
-        "Машины и механизмы": "machinery",
-        "Механизмы": "machinery",
-        "Транспорт": "vehicle",
-        "Человек": "Person",
-    }
-    return alias_map.get(raw.lower(), raw)
+    low = raw.lower()
+    return _RULE_KEYS_LOWER.get(low) or _ALIASES.get(low, raw)
 
 
 def is_monitoring_rule_enabled(class_name, rules=None):
@@ -76,6 +73,9 @@ def filter_detections_for_display(
 
     filtered = []
     for detection in detections:
+        if not isinstance(detection, dict):
+            continue
+
         class_name = detection.get("class_name")
         confidence = float(detection.get("confidence", 0.0))
         if not isinstance(class_name, str):

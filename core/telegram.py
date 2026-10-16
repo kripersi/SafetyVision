@@ -2,22 +2,25 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from core.settings_store import load_telegram_settings
 
 
 def send_telegram_message(message: str) -> bool:
     """Send a text message to Telegram; return whether the request succeeded."""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+    settings = load_telegram_settings()
+    bot_token = settings["bot_token"]
+    chat_id = settings["chat_id"]
+    if not bot_token or not chat_id:
         print("Telegram не настроен: отсутствует бот-токен или chat ID")
         return False
 
     payload = urllib.parse.urlencode({
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": chat_id,
         "text": message,
         "disable_web_page_preview": True,
     }).encode("utf-8")
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
     try:
         request = urllib.request.Request(url, data=payload, method="POST")

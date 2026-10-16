@@ -10,11 +10,12 @@ os.environ.setdefault(
 )
 
 import cv2
-from PySide6.QtCore import QThread, Signal, QMutexLocker
+from PySide6.QtCore import QThread, Signal
 
 from config import (
     DISPLAY_CLASS_NAMES,
     LOCAL_CAMERA_INDEX,
+    VIOLATION_CLASSES
 )
 from core.monitoring import (
     filter_detections_for_display,
@@ -30,10 +31,7 @@ from core.settings_store import (
 from core.telegram import send_telegram_message
 from core.violation_tracker import ViolationTracker
 
-VIOLATION_CLASSES = {"NO-Hardhat", "NO-Mask", "NO-Safety Vest"}
-
 MAX_UI_FPS = 30
-TELEGRAM_COOLDOWN = 30.0     # сек. между сообщениями об одном нарушении на одной камере
 RECONNECT_AFTER_FAILS = 25   # ~5 сек без кадров -> переподключение
 
 
@@ -78,7 +76,12 @@ class CameraWorker(QThread):
     def set_detect_interval(self, interval):
         self.detect_interval = max(0.0, float(interval))
 
+    def request_stop(self):
+        """Только просит поток остановиться, не ждёт."""
+        self._running = False
+
     def stop(self):
+        """Просит остановиться и ждёт завершения."""
         self._running = False
         self.wait(5000)
 
@@ -208,7 +211,7 @@ class CameraWorker(QThread):
             last_frame_id = frame_id
 
             try:
-                with QMutexLocker(self.detector_lock):
+                with self.detector_lock:
                     detections = self.detector.detect(frame)
             except Exception as e:
                 print(f"[{self.camera_name}] Ошибка AI: {e}")

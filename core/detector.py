@@ -2,10 +2,9 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from ultralytics import YOLO
+import torch
 
-from config import DISPLAY_CLASS_NAMES
-
-VIOLATION_CLASSES = {"NO-Hardhat", "NO-Mask", "NO-Safety Vest"}
+from config import DISPLAY_CLASS_NAMES, VIOLATION_CLASSES
 
 COLOR_VIOLATION = (0, 0, 255)   # BGR, красный
 COLOR_OK = (0, 200, 0)          # BGR, зелёный
@@ -35,6 +34,8 @@ class PPEDetector:
         self.model = YOLO(model_path)
         self.imgsz = imgsz
         self.conf = conf
+        self.device = 0 if torch.cuda.is_available() else "cpu"
+        self.half = self.device != "cpu"
         self._font = _load_font(18)
         self._label_cache = {}
 
@@ -52,21 +53,25 @@ class PPEDetector:
             frame,
             imgsz=self.imgsz,
             conf=self.conf,
+            device=self.device,
+            half=self.half,
             verbose=False,
         )
 
         detections = []
         for result in results:
-            if result.boxes is None:
+            boxes = result.boxes
+            if boxes is None or len(boxes) == 0:
                 continue
-            for box in result.boxes:
-                class_id = int(box.cls[0])
-                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+            xyxy = boxes.xyxy.cpu().numpy().astype(int)
+            cls = boxes.cls.cpu().numpy().astype(int)
+            conf = boxes.conf.cpu().numpy()
+            for (x1, y1, x2, y2), c, p in zip(xyxy, cls, conf):
                 detections.append({
-                    "class_id": class_id,
-                    "class_name": self.model.names[class_id],
-                    "confidence": float(box.conf[0]),
-                    "bbox": [x1, y1, x2, y2],
+                    "class_id": int(c),
+                    "class_name": self.model.names[int(c)],
+                    "confidence": float(p),
+                    "bbox": [int(x1), int(y1), int(x2), int(y2)],
                 })
         return detections
 

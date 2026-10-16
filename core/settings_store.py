@@ -1,5 +1,7 @@
+import copy
 import json
 import os
+import threading
 
 from config import (
     CAMERA_MODE,
@@ -13,22 +15,50 @@ from config import (
     LOCAL_CAMERA_URL,
     MONITORING_RULES_FILE,
     MONITORING_SETTINGS_FILE,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID,
 )
+
+_cache_lock = threading.Lock()
+_json_cache = {}  # path -> (mtime_ns, size, data)
 
 
 def _read_json(path: str, default):
     try:
-        with open(path, "r", encoding="utf-8") as file:
-            data = json.load(file)
-            return data if data is not None else default
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        st = os.stat(path)
+    except OSError:
         return default
+    stamp = (st.st_mtime_ns, st.st_size)
+
+    with _cache_lock:
+        entry = _json_cache.get(path)
+        if entry and entry[0] == stamp:
+            data = entry[1]
+        else:
+            data = None
+
+    if data is None:
+        try:
+            with open(path, "r", encoding="utf-8") as file:
+                data = json.load(file)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return default
+        if data is None:
+            return default
+        with _cache_lock:
+            _json_cache[path] = (stamp, data)
+    return copy.deepcopy(data)
 
 
 def _write_json(path: str, payload):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as file:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as file:
         json.dump(payload, file, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
+
+    with _cache_lock:
+        _json_cache.pop(path, None)
 
 
 def load_cameras() -> list[dict]:
@@ -126,6 +156,25 @@ def save_display_confidence_threshold(threshold: float):
     if not isinstance(settings, dict):
         settings = {}
     settings["display_confidence_threshold"] = value
+    _write_json(MONITORING_SETTINGS_FILE, settings)
+
+
+def load_telegram_settings() -> dict[str, str]:
+    settings = _read_json(MONITORING_SETTINGS_FILE, {})
+    if not isinstance(settings, dict):
+        settings = {}
+    return {
+        "bot_token": str(settings.get("telegram_bot_token", TELEGRAM_BOT_TOKEN) or ""),
+        "chat_id": str(settings.get("telegram_chat_id", TELEGRAM_CHAT_ID) or ""),
+    }
+
+
+def save_telegram_settings(bot_token: str, chat_id: str):
+    settings = _read_json(MONITORING_SETTINGS_FILE, {})
+    if not isinstance(settings, dict):
+        settings = {}
+    settings["telegram_bot_token"] = str(bot_token).strip()
+    settings["telegram_chat_id"] = str(chat_id).strip()
     _write_json(MONITORING_SETTINGS_FILE, settings)
 
 

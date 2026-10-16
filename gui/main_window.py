@@ -1,8 +1,10 @@
 import json
 import os
+import re
+import threading
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import QDateTime, QTimer, QMutex
+from PySide6.QtCore import QDateTime, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
@@ -13,7 +15,9 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -22,7 +26,6 @@ from config import (
     DISPLAY_CLASS_NAMES,
     VIOLATION_CLASS_NAMES,
 )
-from core.monitoring import is_monitoring_rule_enabled
 from core.settings_store import (
     get_camera_sources,
     load_cameras,
@@ -30,11 +33,13 @@ from core.settings_store import (
     load_detect_interval,
     load_display_confidence_threshold,
     load_monitoring_rules,
+    load_telegram_settings,
     save_cameras,
     save_confidence_threshold,
     save_detect_interval,
     save_display_confidence_threshold,
     save_monitoring_rules,
+    save_telegram_settings,
 )
 from core.detector import PPEDetector
 from gui.shift_page import ShiftPage
@@ -88,7 +93,7 @@ class MainWindow(QMainWindow):
                 background: #171c22;
                 border: 1px solid #2a2f3a;
             }
-            QPushButton#navButton.active {
+            QPushButton#navButton[active="true"] {
                 background: #ff6b00;
                 color: #fff;
                 border: 1px solid #ff6b00;
@@ -140,11 +145,17 @@ class MainWindow(QMainWindow):
         )
         self.camera_sources = get_camera_sources()
         self.detector = PPEDetector("models/ppe_model.pt")
-        self.detector_lock = QMutex()
+        self.detector_lock = threading.Lock()
         self.json_path = os.path.join("results", "violations.json")
         os.makedirs(os.path.dirname(self.json_path), exist_ok=True)
         self.shift_started_at = datetime.now()
         self.camera_statuses = {camera["name"]: "connecting" for camera in self.camera_sources}
+
+        # Инициализируем заранее: сигналы воркеров могут прийти до первой отрисовки
+        self.dashboard_stat_labels = {}
+        self.dashboard_log_list = None
+        self.camera_status_list = None
+
         self.clock_label = None
         self.clock_timer = QTimer(self)
         self.clock_timer.timeout.connect(self.update_clock)
@@ -178,11 +189,7 @@ class MainWindow(QMainWindow):
     def make_nav_button(self, text, callback=None, active=False):
         button = QPushButton(text)
         button.setObjectName("navButton")
-        if active:
-            button.setObjectName("navButton")
-            button.setProperty("active", True)
-            button.style().unpolish(button)
-            button.style().polish(button)
+        button.setProperty("active", bool(active))
         if callback:
             button.clicked.connect(callback)
         button.setMinimumHeight(46)
@@ -247,14 +254,16 @@ class MainWindow(QMainWindow):
             return {}
 
     def save_activity_log(self, data):
+        tmp = self.json_path + ".tmp"
         try:
-            with open(self.json_path, "w", encoding="utf-8") as file:
+            with open(tmp, "w", encoding="utf-8") as file:
                 json.dump(data, file, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.json_path)  # атомарная замена
         except OSError:
             pass
 
     def start_camera_workers(self):
-        """Запускает по одному воркеру на камеру. Вызывается один раз при старте."""
+        """Запускает по одному воркеру на камеру."""
         detect_interval = load_detect_interval()
         self.camera_statuses = {camera["name"]: "connecting" for camera in self.camera_sources}
         for camera in self.camera_sources:
@@ -282,53 +291,40 @@ class MainWindow(QMainWindow):
             break
         self.refresh_dashboard_stats()
 
-    def on_violation_found(self, camera_name, detections):
-        """Заменяет старую логику из run_background_monitor —
-        получает уже готовые detections от воркера и пишет в лог."""
-        rules = self.get_active_monitoring_rules()
-        today = datetime.now().strftime("%Y-%m-%d")
-        now_text = datetime.now().strftime("%H:%M:%S")
-        log_data = self.load_activity_log()
-
-        events = []
-        confidence_threshold = load_confidence_threshold()
-        for detection in detections:
-            class_name = detection.get("class_name", "")
-            confidence = float(detection.get("confidence", 0.0))
-            if confidence < confidence_threshold:
-                continue
-            if not is_monitoring_rule_enabled(class_name, rules):
-                continue
-            normalized = self.normalize_violation_name(class_name)
-            confidence_pct = int(confidence * 100)
-            events.append((normalized, confidence_pct))
-
-        if not events:
+    def on_violation_found(self, camera_name, events):
+        """events — список событий трекера: class_name, confidence, count, repeat.
+        Фильтрация по порогу и правилам уже выполнена в CameraWorker."""
+        parts = []
+        for ev in events:
+            label = self.normalize_violation_name(ev["class_name"])
+            people = f" ×{ev['count']}" if ev["count"] > 1 else ""
+            parts.append(f"{label}{people} • {int(ev['confidence'] * 100)}%")
+        if not parts:
             return
 
-        unique_events = []
-        seen = set()
-        for label, confidence in events:
-            label_key = str(label)
-            if label_key not in seen:
-                seen.add(label_key)
-                unique_events.append(f"{label} • {confidence}%")
-
-        today_events = log_data.setdefault(today, {})
-        today_events[f"{now_text} ({camera_name})"] = f"{camera_name}: {', '.join(unique_events)}"
+        now = datetime.now()
+        log_data = self.load_activity_log()
+        day = log_data.setdefault(now.strftime("%Y-%m-%d"), {})
+        day[f"{now.strftime('%H:%M:%S')} ({camera_name})"] = f"{camera_name}: {', '.join(parts)}"
         self.save_activity_log(log_data)
 
         self.refresh_dashboard_stats()
 
-    def closeEvent(self, event):
+    def _stop_all_workers(self):
+        # Сначала просим остановиться все потоки сразу...
         for worker in self.camera_workers.values():
-            worker.stop()
-        super().closeEvent(event)
-
-    def restart_camera_workers(self):
+            worker.request_stop()
+        # ...и только потом ждём их завершения.
         for worker in self.camera_workers.values():
             worker.stop()
         self.camera_workers = {}
+
+    def closeEvent(self, event):
+        self._stop_all_workers()
+        super().closeEvent(event)
+
+    def restart_camera_workers(self):
+        self._stop_all_workers()
         self.start_camera_workers()
 
     def iter_violation_entries(self):
@@ -340,7 +336,10 @@ class MainWindow(QMainWindow):
             for time_label, event in day_events.items():
                 if not isinstance(event, str):
                     continue
-                count = sum(event.count(label) for label in violation_labels)
+                count = 0
+                for label in violation_labels:
+                    for m in re.finditer(re.escape(label) + r"(?:\s*×(\d+))?", event):
+                        count += int(m.group(1) or 1)
                 if count == 0:
                     continue
                 try:
@@ -404,7 +403,7 @@ class MainWindow(QMainWindow):
         return dict(sorted(monthly_counts.items()))
 
     def refresh_dashboard_stats(self):
-        if not hasattr(self, "dashboard_stat_labels") or not self.dashboard_stat_labels:
+        if not self.dashboard_stat_labels:
             return
         if self.dashboard_log_list is None:
             return
@@ -521,8 +520,12 @@ class MainWindow(QMainWindow):
         self.camera_status_list = QListWidget()
         self.camera_status_list.setMinimumHeight(180)
         for camera in self.camera_sources:
-            status = self.camera_statuses.get(camera["name"], "connecting")
-            status_label = "онлайн" if status == "connected" else "ошибка подключения" if status == "error" else "подключение"
+            cam_status = self.camera_statuses.get(camera["name"], "connecting")
+            status_label = (
+                "онлайн" if cam_status == "connected"
+                else "ошибка подключения" if cam_status == "error"
+                else "подключение"
+            )
             item = QListWidgetItem(f"{camera['name']} • {status_label}")
             item.setData(256, camera["name"])
             self.camera_status_list.addItem(item)
@@ -564,7 +567,11 @@ class MainWindow(QMainWindow):
 
     def show_settings_page(self):
         self.clear_window()
-        self.set_page(self.build_settings_page(), "settings")
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background: #0f1115; }")
+        scroll_area.setWidget(self.build_settings_page())
+        self.set_page(scroll_area, "settings")
 
     def show_shift_page(self):
         self.clear_window()
@@ -670,6 +677,29 @@ class MainWindow(QMainWindow):
         display_confidence_layout.addStretch()
         layout.addWidget(display_confidence_group)
 
+        telegram_group = QWidget()
+        telegram_layout = QHBoxLayout(telegram_group)
+        telegram_layout.setContentsMargins(0, 0, 0, 0)
+        telegram_layout.setSpacing(10)
+        telegram_settings = load_telegram_settings()
+
+        telegram_token_edit = QLineEdit(telegram_settings["bot_token"])
+        telegram_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        telegram_token_edit.setPlaceholderText("Токен Telegram-бота")
+        telegram_chat_id_edit = QLineEdit(telegram_settings["chat_id"])
+        telegram_chat_id_edit.setPlaceholderText("Chat ID")
+        save_telegram_button = QPushButton("Сохранить Telegram")
+        save_telegram_button.clicked.connect(
+            lambda: self._save_telegram_settings(
+                telegram_token_edit.text(), telegram_chat_id_edit.text()
+            )
+        )
+
+        telegram_layout.addWidget(telegram_token_edit, 3)
+        telegram_layout.addWidget(telegram_chat_id_edit, 1)
+        telegram_layout.addWidget(save_telegram_button)
+        layout.addWidget(telegram_group)
+
         toggle_group = QWidget()
         toggle_layout = QVBoxLayout(toggle_group)
         toggle_layout.setSpacing(10)
@@ -677,7 +707,9 @@ class MainWindow(QMainWindow):
         for key, label in options:
             checkbox = QCheckBox(label)
             checkbox.setChecked(bool(rules.get(key, True)))
-            checkbox.stateChanged.connect(lambda state, key=key: self._save_monitoring_rule(key, state == 2))
+            checkbox.toggled.connect(
+                lambda checked, key=key: self._save_monitoring_rule(key, checked)
+            )
             toggle_layout.addWidget(checkbox)
         layout.addWidget(toggle_group)
 
@@ -752,6 +784,10 @@ class MainWindow(QMainWindow):
 
     def _save_display_confidence_threshold(self, percentage: float):
         save_display_confidence_threshold(percentage / 100.0)
+
+    def _save_telegram_settings(self, bot_token: str, chat_id: str):
+        save_telegram_settings(bot_token, chat_id)
+        QMessageBox.information(self, "Telegram", "Настройки Telegram сохранены.")
 
     def _add_camera_from_config(self, name: str, url: str):
         text_name = (name or "").strip()

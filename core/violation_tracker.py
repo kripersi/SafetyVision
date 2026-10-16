@@ -27,6 +27,7 @@ class ViolationTracker:
             if track is None:
                 track = self._tracks[class_name] = {
                     "first": now,
+                    "last": now,
                     "hits": 0,
                     "max_conf": 0.0,
                     "max_count": 0,
@@ -61,9 +62,12 @@ class ViolationTracker:
 
     @staticmethod
     def _event(class_name, track, repeat):
-        return {
+        event = {
             "class_name": class_name,
             "confidence": track["max_conf"],
             "count": track["max_count"],
             "repeat": repeat,
         }
+        track["max_conf"] = 0.0
+        track["max_count"] = 0
+        return event

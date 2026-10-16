@@ -2,11 +2,9 @@ import os
 from datetime import datetime
 
 import cv2
-import numpy as np
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtCore import Qt, QTimer
 from PySide6.QtCore import QTimer, Signal, QThread, QUrl, Qt
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtGui import QFont
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
@@ -397,50 +395,6 @@ class VideoPage(QWidget):
     # UI
     # --------------------------------------------------------
 
-    def check_live_violations(self):
-
-        if self.current_frame is None:
-            self.add_system_event("Кадр камеры ещё не получен")
-            return
-
-        # Берём тот же самый кадр,
-        # который сейчас получен от камеры
-        frame = self.current_frame.copy()
-
-        try:
-            detections = self.detector.detect(frame)
-        except Exception as exc:
-            self.add_system_event(f"Ошибка YOLO: {exc}")
-            return
-
-        # Это самый свежий кадр камеры
-        self.current_frame = frame.copy()
-
-        # Показываем именно этот кадр
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        h, w, ch = rgb.shape
-        bytes_per_line = ch * w
-
-        image = QImage(
-            rgb.data,
-            w,
-            h,
-            bytes_per_line,
-            QImage.Format_RGB888,
-        )
-
-        pixmap = QPixmap.fromImage(image)
-
-        # Если video_widget у тебя QLabel
-        self.video_widget.setPixmap(
-            pixmap.scaled(
-                self.video_widget.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
-            )
-        )
-
     def setup_ui(self):
 
         root = QVBoxLayout(self)
@@ -650,8 +604,9 @@ class VideoPage(QWidget):
         self.add_system_event("Подключено к фоновому потоку камеры")
 
     def on_frame_ready(self, camera_name, frame):
-        if camera_name != self.camera_sources[self.selected_camera_index]["name"]:
+        if not self.camera_sources or self.selected_camera_index >= len(self.camera_sources):
             return
+
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb.shape
         bytes_per_line = ch * w
@@ -662,21 +617,24 @@ class VideoPage(QWidget):
         )
 
     def on_violation_found(self, camera_name, detections):
-        if camera_name != self.camera_sources[self.selected_camera_index]["name"]:
+        if not self.camera_sources or self.selected_camera_index >= len(self.camera_sources):
             return
+
         if not detections:
             self.add_system_event("Нарушений не обнаружено")
             return
 
         rules = load_monitoring_rules()
-        for detection in detections:
-            class_name = detection.get("class_name", "unknown")
-            confidence = float(detection.get("confidence", 0.0))
+        for ev in detections:
+            class_name = ev.get("class_name", "unknown")
             if not is_monitoring_rule_enabled(class_name, rules):
                 continue
             violation_name = DISPLAY_CLASS_NAMES.get(class_name, class_name)
+            people = f" ×{ev['count']}" if ev.get("count", 1) > 1 else ""
             time_text = datetime.now().strftime("%H:%M:%S")
-            self.add_system_event(f"{time_text} | {violation_name} | {confidence * 100:.0f}%")
+            self.add_system_event(
+                f"{time_text} | {violation_name}{people} | {ev.get('confidence', 0.0) * 100:.0f}%"
+            )
 
     # --------------------------------------------------------
     # SYSTEM EVENTS
@@ -831,6 +789,9 @@ class UploadVideoPage(QWidget):
         self.annotated_video_path = None
         self.check_timer = None
         self.capture = None
+
+        self.video_path = None
+        self.worker = None
 
         self.violations_list = None
         self.last_violations = []
